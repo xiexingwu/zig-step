@@ -1,3 +1,4 @@
 simfiles/
 
 .zig-cache/
+zig-out/
