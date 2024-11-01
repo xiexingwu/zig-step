@@ -1,8 +1,15 @@
 const std = @import("std");
+const log = std.log;
 const assert = std.debug.assert;
 const print = std.debug.print;
 const Allocator = std.mem.Allocator;
 
+const MAX_NOTES = 1024; // MAX360 CSP is 1000
+const MAX_SIMFILE_BYTES = 256 * 1024; // At time of writing, largest DDR simfile is Fascination MAXX @ 137kB
+const MAX_BPMS = 512; // DeltaMAX is 473
+const MAX_STOPS = 128; // Chaos TTM is 70(?)
+
+//// Types
 pub const Mod = enum {
     mmod,
     constant,
@@ -23,17 +30,19 @@ pub const Simfile = struct {
 
 /// SM format
 const Summary = struct {
-    // TODO: this shouldn't be in summary
-    const TimeValue = struct {
-        time: f32,
-        value: f32, // Duration of stop or new bpm value
-    };
-
     title: []u8,
     artist: []u8,
-    bpms: TimeValue,
-    stops: TimeValue,
+    bpms: []BeatTimeValue,
+    stops: []BeatTimeValue,
     offset: f32,
+};
+const BeatTimeValue = struct {
+    beat: f32 = 0,
+    time: f32 = 0,
+    value: f32 = 0, // Duration of stop or new bpm value
+    fn asc(lhs: BeatTimeValue, rhs: BeatTimeValue) bool {
+        return lhs.beat < rhs.beat;
+    }
 };
 
 const Chart = struct {
@@ -95,17 +104,18 @@ const Guide = struct {
 };
 
 /// Parse SM simfile.
-pub fn parseSimfile(allocator: Allocator, filename: []const u8, playMode: PlayMode) !void {
-    const summary = try allocator.create(Summary);
-    defer allocator.destroy(summary);
+pub fn parseSimfile(allocator: Allocator, filename: []const u8, playMode: PlayMode) !?*Simfile {
+    const simfile = try allocator.create(Simfile);
+    var summary = simfile.summary;
 
-    const simfile = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
-    defer simfile.close();
+    const file = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
+    defer file.close();
 
-    var bufReader = std.io.bufferedReader(simfile.reader());
+    var bufReader = std.io.bufferedReader(file.reader());
     var reader = bufReader.reader();
-    // At time of writing, largest DDR simfile is Fascination MAXX @ 137kB
-    var readBuf: [256 * 1024]u8 = undefined;
+    var readBuf: [MAX_SIMFILE_BYTES]u8 = undefined;
+
+    log.debug("About to parse {s}", .{filename});
     sec_blk: while (try reader.readUntilDelimiterOrEof(&readBuf, ';')) |section| {
         // Prune comments (replace with space)
         if (std.mem.indexOf(u8, section, "//")) |i_com| {
@@ -137,8 +147,12 @@ pub fn parseSimfile(allocator: Allocator, filename: []const u8, playMode: PlayMo
                     .artist => {
                         summary.artist = data;
                     },
-                    .bpms => {},
-                    .stops => {},
+                    .bpms => {
+                        summary.bpms = try parseBpms(allocator, data);
+                    },
+                    .stops => {
+                        summary.stops = try parseStops(allocator, data);
+                    },
                     .offset => {
                         summary.offset = try std.fmt.parseFloat(@TypeOf(summary.offset), data);
                     },
@@ -150,7 +164,8 @@ pub fn parseSimfile(allocator: Allocator, filename: []const u8, playMode: PlayMo
         // Parse "NOTES" tag
         if (std.mem.eql(u8, tag, "NOTES")) {
             if (try parseNotesSection(allocator, data, playMode)) |chart| {
-                _ = chart;
+                simfile.chart = chart.*;
+                timeGimmicks(summary.bpms, summary.stops);
                 break :sec_blk;
             } else {
                 continue :sec_blk;
@@ -164,6 +179,107 @@ pub fn parseSimfile(allocator: Allocator, filename: []const u8, playMode: PlayMo
         }
         // Check all necessary fields have been found
     }
+
+    return simfile;
+}
+
+fn timeGimmicks(bpms: []BeatTimeValue, stops: []BeatTimeValue) void {
+    var i_s: u16 = 0;
+    var i_b: u16 = 0;
+
+    var bpmPrev = bpms[0].value;
+    var beatPrev = 0 * bpms[0].beat;
+    var time = 0 * bpms[0].time; // TODO: offset
+    while (true) {
+        var branch: enum { doStop, doBpm } = undefined;
+        if (i_s >= stops.len and i_b >= bpms.len) {
+            break;
+        } else if (i_s >= stops.len) {
+            branch = .doBpm;
+            log.debug("----stop {}/{}, bpm {}/{} @ {d:.0}----{s}", .{
+                i_s,
+                stops.len,
+                i_b,
+                bpms.len,
+                bpms[i_b].beat,
+                @tagName(branch),
+            });
+        } else if (i_b >= bpms.len) {
+            branch = .doStop;
+            log.debug("----stop {}/{} @ {d:.0}, bpm {}/{}----{s}", .{
+                i_s,
+                stops.len,
+                stops[i_s].beat,
+                i_b,
+                bpms.len,
+                @tagName(branch),
+            });
+        } else {
+            branch = if (stops[i_s].beat <= bpms[i_b].beat) .doStop else .doBpm;
+            log.debug("----stop {}/{} @ {d:.0}, bpm {}/{} @ {d:.0}----{s}", .{
+                i_s,
+                stops.len,
+                stops[i_s].beat,
+                i_b,
+                bpms.len,
+                bpms[i_b].beat,
+                @tagName(branch),
+            });
+        }
+
+        const gim = if (branch == .doStop) &stops[i_s] else &bpms[i_b];
+        const dt = (gim.beat - beatPrev) / bpmPrev * 60;
+        time += dt;
+        gim.time = time;
+        log.debug("beatPrev {d:.0}, bpmPrev {d:.0}, time {d:.1}", .{ beatPrev, bpmPrev, time });
+        log.debug("beat {d:.0}, value {d:.1}, dt {d:.1}", .{ gim.beat, gim.value, dt });
+
+        // prep next iteration
+        beatPrev = gim.beat;
+        switch (branch) {
+            .doStop => {
+                time += gim.value;
+                i_s += 1;
+            },
+            .doBpm => {
+                bpmPrev = gim.value;
+                i_b += 1;
+            },
+        }
+    }
+}
+
+fn parseBpms(allocator: Allocator, data: []const u8) ![]BeatTimeValue {
+    const bpms = try allocator.alloc(BeatTimeValue, MAX_BPMS);
+
+    log.debug("#BPMS:{s}", .{data});
+    var it = std.mem.splitScalar(u8, data, ',');
+    var i_bpm: u16 = 0;
+    while (it.next()) |bpmStr| : (i_bpm += 1) {
+        const i_eq = std.mem.indexOf(u8, bpmStr, "=").?;
+        var bpm = &bpms[i_bpm];
+        bpm.beat = try std.fmt.parseFloat(@TypeOf(bpm.beat), bpmStr[0..i_eq]);
+        bpm.value = try std.fmt.parseFloat(@TypeOf(bpm.value), bpmStr[i_eq + 1 ..]);
+        log.debug("{}:{s} -> {d:.0},{d:.0}", .{ i_bpm, bpmStr, bpm.beat, bpm.value });
+    }
+    return bpms[0..i_bpm];
+}
+
+fn parseStops(allocator: Allocator, data: []const u8) ![]BeatTimeValue {
+    const stops = try allocator.alloc(BeatTimeValue, MAX_STOPS);
+
+    log.debug("#STOPS:{s}", .{data});
+    var it = std.mem.splitScalar(u8, data, ',');
+    var i_stop: u16 = 0;
+    while (it.next()) |stopStr| : (i_stop += 1) {
+        const i_eq = std.mem.indexOf(u8, stopStr, "=").?;
+        var stop = &stops[i_stop];
+        stop.beat = try std.fmt.parseFloat(@TypeOf(stop.beat), stopStr[0..i_eq]);
+        stop.value = try std.fmt.parseFloat(@TypeOf(stop.value), stopStr[i_eq + 1 ..]);
+        log.debug("{}:{s} -> {d:.0},{d:.2}", .{ i_stop, stopStr, stop.beat, stop.value });
+    }
+    log.debug("{} stops found.", .{i_stop});
+    return stops[0..i_stop];
 }
 
 fn parseNotesSection(allocator: Allocator, data: []const u8, playMode: PlayMode) !?*Chart {
@@ -204,7 +320,7 @@ fn parseNotesSection(allocator: Allocator, data: []const u8, playMode: PlayMode)
                 // print("Groove: {s}\n", .{subsection});
             },
             5 => {
-                _ = try parseMeasures(
+                chart.notes = try parseMeasures(
                     allocator,
                     subsection,
                 );
@@ -216,7 +332,7 @@ fn parseNotesSection(allocator: Allocator, data: []const u8, playMode: PlayMode)
 }
 
 fn parseMeasures(allocator: Allocator, data: []const u8) ![]Note {
-    const notes = try allocator.alloc(Note, 1024);
+    const notes = try allocator.alloc(Note, MAX_NOTES);
     var i_note: u10 = 0;
 
     var measureIt = std.mem.splitScalar(u8, data, ',');
