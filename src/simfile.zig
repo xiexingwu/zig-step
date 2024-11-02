@@ -43,26 +43,26 @@ pub const Simfile = struct {
 const Summary = struct {
     title: [128]u8,
     artist: [128]u8,
-    bpms: []BeatTimeValue,
-    stops: []BeatTimeValue,
+    bpms: []Gimmick,
+    stops: []Gimmick,
     offset: f32,
     pub fn initAlloc(self: *Summary, allocator: Allocator) !void {
-        self.bpms = try allocator.alloc(BeatTimeValue, MAX_BPMS);
-        self.stops = try allocator.alloc(BeatTimeValue, MAX_STOPS);
+        self.bpms = try allocator.alloc(Gimmick, MAX_BPMS);
+        self.stops = try allocator.alloc(Gimmick, MAX_STOPS);
     }
     pub fn new(allocator: Allocator) !Summary {
         var summary = try allocator.create(Summary);
-        summary.bpms = try allocator.alloc(BeatTimeValue, MAX_BPMS);
-        summary.stops = try allocator.alloc(BeatTimeValue, MAX_STOPS);
+        summary.bpms = try allocator.alloc(Gimmick, MAX_BPMS);
+        summary.stops = try allocator.alloc(Gimmick, MAX_STOPS);
         return summary.*;
     }
 };
 
-const BeatTimeValue = struct {
+const Gimmick = struct {
     beat: f32 = 0,
     time: f32 = 0,
     value: f32 = 0, // Duration of stop or new bpm value
-    fn asc(lhs: BeatTimeValue, rhs: BeatTimeValue) bool {
+    fn asc(lhs: Gimmick, rhs: Gimmick) bool {
         return lhs.beat < rhs.beat;
     }
 };
@@ -184,10 +184,12 @@ pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: P
                         _ = try std.fmt.bufPrintZ(&summary.artist, "{s}", .{data});
                     },
                     .bpms => {
-                        _ = try parseBpms(summary.bpms, data);
+                        log.debug("Parsing #BPMS:{s}", .{data});
+                        _ = try parseGimmick(summary.bpms, data);
                     },
                     .stops => {
-                        _ = try parseStops(summary.stops, data);
+                        log.debug("Parsing #STOPS:{s}", .{data});
+                        _ = try parseGimmick(summary.stops, data);
                     },
                     .offset => {
                         summary.offset = try std.fmt.parseFloat(@TypeOf(summary.offset), data);
@@ -199,7 +201,7 @@ pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: P
 
         // Parse "NOTES" tag
         if (std.mem.eql(u8, tag, "NOTES")) {
-            if (try parseNotesSection(&chart, data, playMode)) |_| {
+            if (parseNotesSection(&chart, data, playMode)) |_| {
                 timeGimmicks(summary.bpms, summary.stops);
                 break :sec_blk;
             } else {
@@ -218,7 +220,7 @@ pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: P
     return simfile;
 }
 
-fn timeGimmicks(bpms: []BeatTimeValue, stops: []BeatTimeValue) void {
+fn timeGimmicks(bpms: []Gimmick, stops: []Gimmick) void {
     var i_s: u16 = 0;
     var i_b: u16 = 0;
 
@@ -284,22 +286,9 @@ fn timeGimmicks(bpms: []BeatTimeValue, stops: []BeatTimeValue) void {
     }
 }
 
-fn parseBpms(bpms: []BeatTimeValue, data: []const u8) ![]BeatTimeValue {
-    log.debug("Parsing #BPMS:{s}", .{data});
-    var it = std.mem.splitScalar(u8, data, ',');
-    var i_bpm: u16 = 0;
-    while (it.next()) |bpmStr| : (i_bpm += 1) {
-        const i_eq = std.mem.indexOf(u8, bpmStr, "=").?;
-        var bpm = &bpms[i_bpm];
-        bpm.beat = try std.fmt.parseFloat(@TypeOf(bpm.beat), bpmStr[0..i_eq]);
-        bpm.value = try std.fmt.parseFloat(@TypeOf(bpm.value), bpmStr[i_eq + 1 ..]);
-        log.debug("{}:{s} -> {d:.0},{d:.0}", .{ i_bpm, bpmStr, bpm.beat, bpm.value });
-    }
-    return bpms[0..i_bpm];
-}
-
-fn parseStops(stops: []BeatTimeValue, data: []const u8) ![]BeatTimeValue {
-    log.debug("Parsing #STOPS:{s}", .{data});
+/// Gimmicks have the string format:
+/// <beat>=<value>,<beat>=<value>,...
+fn parseGimmick(stops: []Gimmick, data: []const u8) ![]Gimmick {
     var it = std.mem.splitScalar(u8, data, ',');
     var i_stop: u16 = 0;
     while (it.next()) |stopStr| : (i_stop += 1) {
@@ -313,7 +302,7 @@ fn parseStops(stops: []BeatTimeValue, data: []const u8) ![]BeatTimeValue {
     return stops[0..i_stop];
 }
 
-fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) !?*Chart {
+fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) ?*Chart {
     var it = std.mem.splitScalar(u8, data, ':');
     // Expect 6 subsections:
     //  0.sp/dp
@@ -323,7 +312,7 @@ fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) !?*Cha
     //  4.Groove
     //  5.Notes
     // return null if 0 or 2 don't match user selection
-    var i_sub: u8 = 0;
+    var i_sub: u3 = 0;
     while (it.next()) |subsectionRaw| : (i_sub += 1) {
         const subsection = std.mem.trim(u8, subsectionRaw, " \r\n\t");
         switch (i_sub) {
@@ -343,21 +332,24 @@ fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) !?*Cha
                 chart.diff = playMode.diff;
             },
             3 => {
-                chart.level = try std.fmt.parseInt(u8, subsection, 0);
+                chart.level = std.fmt.parseInt(u8, subsection, 0) catch 0;
             },
             4 => {
                 // print("Groove: {s}\n", .{subsection});
             },
             5 => {
-                chart.notes = try parseMeasures(chart.notes, subsection);
+                chart.notes = parseMeasures(chart.notes, subsection);
             },
-            else => unreachable,
+            else => {
+                log.err("Too many ':' found in #NOTES section");
+                unreachable;
+            },
         }
     }
     return chart;
 }
 
-fn parseMeasures(notes: []Note, data: []const u8) ![]Note {
+fn parseMeasures(notes: []Note, data: []const u8) []Note {
     var i_note: u10 = 0;
 
     var measureIt = std.mem.splitScalar(u8, data, ',');
@@ -383,15 +375,12 @@ fn parseMeasures(notes: []Note, data: []const u8) ![]Note {
                         i_note += 1; // next note
                     },
                     else => {
-                        print("unexpected '{c}'\n", .{c});
+                        log.err("unexpected '{c}'\n", .{c});
                         unreachable;
                     },
-                    // else => unreachable,
                 }
             }
         }
-        // print("{}: {}, {}\n", .{ i_meas, denominator, _notes });
-        // print("{s}\n", .{section});
     }
     return notes;
 }
