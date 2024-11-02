@@ -199,24 +199,23 @@ pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: P
             }
         }
 
-        // Parse "NOTES" tag
+        // Parse "NOTES" tag, breaking if correct chart found
         if (std.mem.eql(u8, tag, "NOTES")) {
-            if (parseNotesSection(&chart, data, playMode)) |_| {
-                timeGimmicks(summary.bpms, summary.stops);
+            if (parseNotesSection(&chart, data, playMode) != null) {
                 break :sec_blk;
-            } else {
-                continue :sec_blk;
             }
-            print("---------------\n", .{});
-            print("Sp/Dp:{s}\n", .{summary.spdp.toSmString()});
-            print("Diff:{s}\n", .{summary.diff.toSmString()});
-            print("Level:{d}\n", .{summary.level});
-            print("---------------\n", .{});
-            break :sec_blk;
         }
-        // Check all necessary fields have been found
     }
+    // Assert we parsed at least one note
+    assert(chart.notes[0].type != .sentinel);
 
+    // Compute timing
+    print("---------------\n", .{});
+    print("Sp/Dp:{s}\n", .{chart.spdp.toSmString()});
+    print("Diff:{s}\n", .{chart.diff.toSmString()});
+    print("Level:{d}\n", .{chart.level});
+    print("---------------\n", .{});
+    timeGimmicks(summary.bpms, summary.stops);
     return simfile;
 }
 
@@ -341,7 +340,7 @@ fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) ?*Char
                 chart.notes = parseMeasures(chart.notes, subsection);
             },
             else => {
-                log.err("Too many ':' found in #NOTES section");
+                log.err("Too many ':' found in #NOTES section", .{});
                 unreachable;
             },
         }
