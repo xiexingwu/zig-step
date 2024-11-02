@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const print = std.debug.print;
 const Allocator = std.mem.Allocator;
 
-const MAX_GUIDES = 4 * 256; // Is 256 measures for ddr songs?
+const MAX_BEATS = 4 * 256; // Is 256 measures for ddr songs?
 const MAX_NOTES = 1024; // MAX360 CSP is 1000
 const MAX_SIMFILE_BYTES = 256 * 1024; // At time of writing, largest DDR simfile is Fascination MAXX @ 137kB
 const MAX_BPMS = 512; // DeltaMAX is 473
@@ -74,15 +74,15 @@ const Chart = struct {
     mod: Mod,
     modValue: f32,
 
-    guides: []Guide,
+    beats: []Beat,
     notes: []Note,
     pub fn initAlloc(self: *Chart, allocator: Allocator) !void {
-        self.guides = try allocator.alloc(Guide, MAX_GUIDES);
+        self.beats = try allocator.alloc(Beat, MAX_BEATS);
         self.notes = try allocator.alloc(Note, MAX_NOTES);
     }
     pub fn new(allocator: Allocator) !Chart {
         var chart = try allocator.create(Chart);
-        chart.guides = try allocator.alloc(Guide, MAX_GUIDES);
+        chart.beats = try allocator.alloc(Beat, MAX_BEATS);
         chart.notes = try allocator.alloc(Note, MAX_NOTES);
         return chart.*;
     }
@@ -130,7 +130,7 @@ const Note = struct {
     };
 };
 
-const Guide = struct {
+const Beat = struct {
     mode: enum { off, border, center } = .center,
     timeArrival: f32, // relevant in CMOD
 };
@@ -185,11 +185,11 @@ pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: P
                     },
                     .bpms => {
                         log.debug("Parsing #BPMS:{s}", .{data});
-                        _ = try parseGimmick(summary.bpms, data);
+                        summary.bpms = try parseGimmick(summary.bpms, data);
                     },
                     .stops => {
                         log.debug("Parsing #STOPS:{s}", .{data});
-                        _ = try parseGimmick(summary.stops, data);
+                        summary.stops = try parseGimmick(summary.stops, data);
                     },
                     .offset => {
                         summary.offset = try std.fmt.parseFloat(@TypeOf(summary.offset), data);
@@ -216,6 +216,7 @@ pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: P
     print("Level:{d}\n", .{chart.level});
     print("---------------\n", .{});
     timeGimmicks(summary.bpms, summary.stops);
+    // timeGimmicks(summary.bpms, summary.stops);
     return simfile;
 }
 
@@ -289,16 +290,16 @@ fn timeGimmicks(bpms: []Gimmick, stops: []Gimmick) void {
 /// <beat>=<value>,<beat>=<value>,...
 fn parseGimmick(stops: []Gimmick, data: []const u8) ![]Gimmick {
     var it = std.mem.splitScalar(u8, data, ',');
-    var i_stop: u16 = 0;
-    while (it.next()) |stopStr| : (i_stop += 1) {
-        const i_eq = std.mem.indexOf(u8, stopStr, "=").?;
-        var stop = &stops[i_stop];
-        stop.beat = try std.fmt.parseFloat(@TypeOf(stop.beat), stopStr[0..i_eq]);
-        stop.value = try std.fmt.parseFloat(@TypeOf(stop.value), stopStr[i_eq + 1 ..]);
-        log.debug("{}:{s} -> {d:.0},{d:.2}", .{ i_stop, stopStr, stop.beat, stop.value });
+    var i_gim: u16 = 0;
+    while (it.next()) |gimStr| : (i_gim += 1) {
+        const i_eq = std.mem.indexOf(u8, gimStr, "=").?;
+        var gim = &stops[i_gim];
+        gim.beat = try std.fmt.parseFloat(@TypeOf(gim.beat), gimStr[0..i_eq]);
+        gim.value = try std.fmt.parseFloat(@TypeOf(gim.value), gimStr[i_eq + 1 ..]);
+        log.debug("{}:{s} -> {d:.0},{d:.2}", .{ i_gim, gimStr, gim.beat, gim.value });
     }
-    log.debug("{} stops found.", .{i_stop});
-    return stops[0..i_stop];
+    log.debug("{} stops found.", .{i_gim});
+    return stops[0..i_gim];
 }
 
 fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) ?*Chart {
