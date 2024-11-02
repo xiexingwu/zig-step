@@ -67,7 +67,7 @@ const Gimmick = struct {
     }
 };
 
-const Chart = struct {
+pub const Chart = struct {
     spdp: SpDp,
     diff: Diff,
     level: u8 = 0,
@@ -131,12 +131,11 @@ const Note = struct {
 };
 
 const Beat = struct {
-    mode: enum { off, border, center } = .center,
     timeArrival: f32, // relevant in CMOD
 };
 
 /// Parse SM simfile.
-pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: PlayMode) !?*Simfile {
+pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: PlayMode) !*Simfile {
     //// Alternative allocation
     // const simfile = try allocator.create(Simfile);
     // try simfile.initAlloc(allocator);

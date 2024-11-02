@@ -1,6 +1,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 const sm = @import("./simfile.zig");
+const play = @import("./play.zig");
 const assert = std.debug.assert;
 const print = std.debug.print;
 
@@ -38,7 +39,6 @@ pub fn main() anyerror!void {
     //--------------------------------------------------------------------------------------
     const music: rl.Music = rl.loadMusicStream("./simfiles/Electronic Sports Complex/Electronic Sports Complex.ogg");
     rl.playMusicStream(music);
-    const musicLength: f32 = rl.getMusicTimeLength(music);
 
     //--------------------------------------------------------------------------------------
     // Memory
@@ -49,32 +49,24 @@ pub fn main() anyerror!void {
     defer arena.deinit();
     const arenaAllocator = arena.allocator();
 
-    const simfile = "./simfiles/Electronic Sports Complex/Electronic Sports Complex.sm";
-    _ = try sm.parseSimfileAlloc(arenaAllocator, simfile, playMode);
+    const filename = "./simfiles/Electronic Sports Complex/Electronic Sports Complex.sm";
+    const simfile = try sm.parseSimfileAlloc(arenaAllocator, filename, playMode);
 
     // const GameState = enum {
     //     Menu, Options, Browse, Play
     // };
     // var gameState: GameState = .Play;
-    var msgTimePlayed: [32:0]u8 = undefined;
+    try play.init(arenaAllocator, music, simfile.chart);
 
-    var hasChartEnded = false;
     // Main game loop
     while (!rl.windowShouldClose()) { // Detect window close button or ESC key
         //----------------------------------------------------------------------------------
         // Update
         //----------------------------------------------------------------------------------
         rl.updateMusicStream(music);
-        const timePlayed = rl.getMusicTimePlayed(music);
-        _ = try std.fmt.bufPrintZ(&msgTimePlayed, "{d:0>2.0}:{d:0>2.0}.{d:0>2.0}", .{ @divTrunc(timePlayed, 60), @rem(timePlayed, 60), @rem(timePlayed, 1) * 100 });
 
         // TODO: instead check all notes finished to determine hasChartEnded
-        if (timePlayed / musicLength >= 0.99) {
-            hasChartEnded = true;
-        } else if (hasChartEnded and timePlayed < 5) {
-            // Dirty hack to check song finished the first time and prevent it
-            // from looping. timePlayed cannot line up with musicLength
-            // exactly, hence cull it at the beginning of the loop.
+        if (play.hasSongEnded()) {
             rl.stopMusicStream(music);
             rl.closeWindow();
         }
@@ -87,7 +79,10 @@ pub fn main() anyerror!void {
 
         rl.clearBackground(rl.Color.white);
 
-        rl.drawText(msgTimePlayed[0..], 190, 200, 20, rl.Color.light_gray);
+        rl.drawText(play.getTimePlayedMsg(), 190, 200, 20, rl.Color.light_gray);
+        rl.drawFPS(10, 10);
         //----------------------------------------------------------------------------------
     }
+
+    _ = arena.reset(.retain_capacity);
 }
