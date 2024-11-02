@@ -50,7 +50,7 @@ pub fn main() anyerror!void {
     const arenaAllocator = arena.allocator();
 
     const simfile = "./simfiles/Electronic Sports Complex/Electronic Sports Complex.sm";
-    _ = try sm.parseSimfile(arenaAllocator, simfile, playMode);
+    _ = try sm.parseSimfileAlloc(arenaAllocator, simfile, playMode);
 
     // const GameState = enum {
     //     Menu, Options, Browse, Play
