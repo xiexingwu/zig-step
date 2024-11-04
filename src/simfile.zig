@@ -45,6 +45,7 @@ const Summary = struct {
     artist: [128]u8,
     bpms: []Gimmick,
     stops: []Gimmick,
+    gimms: []Gimmick,
     offset: f32,
     pub fn initAlloc(self: *Summary, allocator: Allocator) !void {
         self.bpms = try allocator.alloc(Gimmick, MAX_BPMS);
@@ -58,12 +59,18 @@ const Summary = struct {
     }
 };
 
+const GimmickType = enum(u2) { bpm, stop, nil };
 const Gimmick = struct {
+    type: GimmickType = .nil,
     beat: f32 = 0,
     time: f32 = 0,
     value: f32 = 0, // Duration of stop or new bpm value
-    fn asc(lhs: Gimmick, rhs: Gimmick) bool {
-        return lhs.beat < rhs.beat;
+    fn lessThan(_: @TypeOf(.{}), lhs: Gimmick, rhs: Gimmick) bool {
+        if (lhs.beat < rhs.beat) return true;
+        if (lhs.beat == rhs.beat) {
+            return @intFromEnum(lhs.type) <= @intFromEnum(rhs.type);
+        }
+        return false;
     }
 };
 
@@ -73,6 +80,7 @@ pub const Chart = struct {
     level: u8 = 0,
     mod: Mod,
     modValue: f32,
+    measures: u8,
 
     beats: []Beat,
     notes: []Note,
@@ -109,16 +117,40 @@ const Diff = enum {
     }
 };
 
-const Note = struct {
-    column: u3, // arrow column (0-indexed: p1-ldur p2-ldur)
+pub const Note = struct {
     type: NoteType = .sentinel,
-    denominator: u8, // # of lines measure is broken into: 4 = quarter notes, 8 = eighth notes etc.
-    numerator: u8, // line of appearance (1-indexed)
-    timeArrival: f32, // arrival time (sec)
-    pub fn setTimeArrival(self: *Note) void {
-        self.timeArrival = -1;
+    column: u8 = 0, // bit-wise indication of active column (LSB is p1-left, MSB is p2-right)
+
+    denominator: u8 = 0, // # of lines measure is broken into: 4 = quarter notes, 8 = eighth notes etc.
+    numerator: u8 = 0, // line of appearance (0-indexed)
+    measure: u8 = 0, // measure (0-indexed)
+    timeArrival: f32 = 0, // arrival time (sec)
+
+    judgment: Judgment = .nil,
+
+    pub fn getColumnChar(self: Note) u8 {
+        return switch (self.column) {
+            1 << 0 => 'L',
+            1 << 1 => 'D',
+            1 << 2 => 'U',
+            1 << 3 => 'R',
+            1 << 4 => 'l',
+            1 << 5 => 'd',
+            1 << 6 => 'u',
+            1 << 7 => 'r',
+            else => unreachable,
+        };
     }
 
+    const Judgment = enum {
+        nil,
+        marvelous,
+        perfect,
+        great,
+        good,
+        ok,
+        miss,
+    };
     const NoteType = enum(u8) {
         sentinel = '0',
         note,
@@ -130,18 +162,24 @@ const Note = struct {
     };
 };
 
+pub const Note0 = Note{};
+
+// const Beat0 = Beat{};
 const Beat = struct {
-    timeArrival: f32, // relevant in CMOD
+    timeArrival: f32 = 0, // relevant in CMOD
 };
+fn beatToTime(beat: f32, bpm: f32) f32 {
+    return beat / bpm * 60;
+}
 
 /// Parse SM simfile.
 pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: PlayMode) !*Simfile {
     //// Alternative allocation
     // const simfile = try allocator.create(Simfile);
     // try simfile.initAlloc(allocator);
-    const simfile = try Simfile.new(allocator);
-    var summary = simfile.summary;
-    var chart = simfile.chart;
+    var simfile = try Simfile.new(allocator);
+    var summary = &simfile.summary;
+    var chart = &simfile.chart;
 
     const file = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
     defer file.close();
@@ -183,16 +221,15 @@ pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: P
                         _ = try std.fmt.bufPrintZ(&summary.artist, "{s}", .{data});
                     },
                     .bpms => {
-                        log.debug("Parsing #BPMS:{s}", .{data});
-                        summary.bpms = try parseGimmick(summary.bpms, data);
+                        summary.bpms = try parseGimmick(.bpm, summary.bpms, data);
                     },
                     .stops => {
-                        log.debug("Parsing #STOPS:{s}", .{data});
-                        summary.stops = try parseGimmick(summary.stops, data);
+                        summary.stops = try parseGimmick(.stop, summary.stops, data);
                     },
                     .offset => {
                         summary.offset = try std.fmt.parseFloat(@TypeOf(summary.offset), data);
                     },
+                    else => {},
                 }
                 break;
             }
@@ -200,26 +237,165 @@ pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: P
 
         // Parse "NOTES" tag, breaking if correct chart found
         if (std.mem.eql(u8, tag, "NOTES")) {
-            if (parseNotesSection(&chart, data, playMode) != null) {
+            if (parseNotesSection(chart, data, playMode)) |c| {
+                // This reassignment is technically not needed since chart is
+                // passed by reference. However, this maintains the pattern
+                // that the parse functions return a copy of what they parse.
+                chart = c;
                 break :sec_blk;
             }
         }
     }
-    // Assert we parsed at least one note
-    assert(chart.notes[0].type != .sentinel);
 
-    // Compute timing
-    print("---------------\n", .{});
-    print("Sp/Dp:{s}\n", .{chart.spdp.toSmString()});
-    print("Diff:{s}\n", .{chart.diff.toSmString()});
-    print("Level:{d}\n", .{chart.level});
-    print("---------------\n", .{});
-    timeGimmicks(summary.bpms, summary.stops);
-    // timeGimmicks(summary.bpms, summary.stops);
+    // Assert we parsed at least one note
+    assert(simfile.chart.notes[0].type != .sentinel);
+    // Assert notes doesn't contain sentinel
+    const len = simfile.chart.notes.len;
+    const n = simfile.chart.notes[0..];
+    assert(len <= MAX_NOTES and !std.meta.eql(n[len - 1], Note0));
+
+    // Sort gimmicks and compute timings
+    const gimmsConcat = [_][]Gimmick{ summary.stops, summary.bpms };
+    var gimms = try std.mem.concat(allocator, Gimmick, &gimmsConcat);
+    std.sort.pdq(Gimmick, gimms, .{}, Gimmick.lessThan);
+    gimms = timeGimmicks(gimms);
+
+    // Debug logs before final return
+    // summary = timeGimmicksLegacy(summary);
+    summary.gimms = gimms;
+    simfile = timeNotes(simfile);
+
+    log.debug("---------------", .{});
+    log.debug("Sp/Dp:{s}", .{simfile.chart.spdp.toSmString()});
+    log.debug("Diff:{s}", .{simfile.chart.diff.toSmString()});
+    log.debug("Level:{d}", .{simfile.chart.level});
+    log.debug("Measures:{d}", .{simfile.chart.measures});
+    log.debug("Gimmicks:{d}", .{simfile.summary.gimms.len});
+    log.debug("Bpms:{d}", .{simfile.summary.bpms.len});
+    log.debug("Stops:{d}", .{simfile.summary.stops.len});
+    log.debug("Notes:{d}", .{simfile.chart.notes.len});
+    log.debug("---------------", .{});
     return simfile;
 }
 
-fn timeGimmicks(bpms: []Gimmick, stops: []Gimmick) void {
+/// Determine the arrival time for all notes.
+fn timeNotes(simfile: *Simfile) *Simfile {
+    const chart = simfile.chart;
+    const summary = simfile.summary;
+    const notes = chart.notes;
+    const gimms = summary.gimms;
+
+    var i_gimm: u16 = 1; // Skip first value (sets song bpm and is not an actual gimmick)
+    var i_note: u16 = 0;
+    var time: f32 = 0.0;
+    var bpm = summary.bpms[0].value;
+    for (0..chart.measures) |meas| {
+        var beatPrev: f32 = 0;
+        for (0..4) |beatMeasInt| {
+            const beatMeas: f32 = @floatFromInt(beatMeasInt + 1);
+            defer {
+                time += beatToTime(beatMeas - beatPrev, bpm);
+                beatPrev = beatMeas;
+            }
+
+            // Loop over remaining notes and check if this beat in the measure
+            // needs to be further split by the notes.
+            while (i_note < notes.len) : (i_note += 1) {
+                var note = &notes[i_note]; // Use ptr since we need to modify timing
+                // Check next note is for this measure
+                if (note.measure > meas) break;
+                // Check next note is for this beat in the measure
+                const den: f32 = @floatFromInt(note.denominator);
+                const num: f32 = @floatFromInt(note.numerator);
+                const beatNote = 4.0 * num / den;
+                if (beatNote > beatMeas) break;
+
+                // We now know beatMeas will be split by the note.
+                defer {
+                    time += beatToTime(beatNote - beatPrev, bpm);
+                    note.timeArrival = time;
+                    beatPrev = beatNote;
+                    print("m{d: >2} b{d: >3}/{d: <3} = {d: >5.2}: n{} @ {c} {s} @ {d:.2}s\n", .{
+                        meas,
+                        note.numerator,
+                        note.denominator,
+                        beatNote,
+                        i_note,
+                        note.getColumnChar(),
+                        @tagName(note.type),
+                        note.timeArrival,
+                    });
+                }
+
+                // Check for gimmicks
+                while (i_gimm < gimms.len) : (i_gimm += 1) {
+                    const gimm = gimms[i_gimm];
+                    // Gimmick beat is relative to song start. Convert to measure start
+                    const beatGimm = gimm.beat - 4.0 * @as(f32, @floatFromInt(meas));
+                    // Check next gimmick occurs before this note
+                    if (beatGimm >= beatNote) break;
+                    log.debug("{d:.2}s found {s}: b{d:.2} with value {d:.2} @ {d:.2}s", .{ time, @tagName(gimm.type), gimm.beat, gimm.value, gimm.time });
+
+                    switch (gimm.type) {
+                        .bpm => {
+                            // Bpm change should split the beat
+                            time += beatToTime(beatGimm - beatPrev, bpm);
+                            bpm = gimm.value;
+                            beatPrev = beatGimm;
+                            // The time should now sync with when the bpm change happens
+                            assert(@abs(gimm.time - time) < 0.01);
+                        },
+                        .stop => {
+                            // Stops should just accumulate the time
+                            time += gimm.value;
+                        },
+                        .nil => {
+                            log.err("Found unintialised gimmick when timing notes", .{});
+                            unreachable;
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    return simfile;
+}
+
+/// Computes timing for SORTED array of gimmicks (by time of gimmick start)
+fn timeGimmicks(gimms: []Gimmick) []Gimmick {
+    assert(gimms[0].type == .bpm and gimms[0].value != 0);
+    var bpmPrev = gimms[0].value;
+    var beatPrev = 0 * gimms[0].beat;
+    var time = 0 * gimms[0].time; // TODO: offset
+    for (gimms) |*gimm| {
+        const dt = beatToTime(gimm.beat - beatPrev, bpmPrev);
+        time += dt;
+        gimm.time = time;
+        print("beatPrev {d:.0}, bpmPrev {d:.0}, time {d:.1}\n", .{ beatPrev, bpmPrev, time });
+        print("beat {d:.0}, value {d:.1}, dt {d:.1}\n", .{ gimm.beat, gimm.value, dt });
+
+        // Prep next loop
+        beatPrev = gimm.beat;
+        switch (gimm.type) {
+            .bpm => {
+                bpmPrev = gimm.value;
+            },
+            .stop => {
+                time += gimm.value;
+            },
+            .nil => {
+                log.err("Found unitialised gimmick @ beat {d:.0}", .{gimm.beat});
+                unreachable;
+            },
+        }
+    }
+    return gimms;
+}
+
+fn timeGimmicksLegacy(summary: *Summary) *Summary {
+    const bpms = summary.bpms;
+    const stops = summary.stops;
     var i_s: u16 = 0;
     var i_b: u16 = 0;
 
@@ -263,42 +439,45 @@ fn timeGimmicks(bpms: []Gimmick, stops: []Gimmick) void {
             });
         }
 
-        const gim = if (branch == .doStop) &stops[i_s] else &bpms[i_b];
-        const dt = (gim.beat - beatPrev) / bpmPrev * 60;
+        const gimm = if (branch == .doStop) &stops[i_s] else &bpms[i_b];
+        const dt = beatToTime(gimm.beat - beatPrev, bpmPrev);
         time += dt;
-        gim.time = time;
+        gimm.time = time;
         log.debug("beatPrev {d:.0}, bpmPrev {d:.0}, time {d:.1}", .{ beatPrev, bpmPrev, time });
-        log.debug("beat {d:.0}, value {d:.1}, dt {d:.1}", .{ gim.beat, gim.value, dt });
+        log.debug("beat {d:.0}, value {d:.1}, dt {d:.1}", .{ gimm.beat, gimm.value, dt });
 
         // prep next iteration
-        beatPrev = gim.beat;
+        beatPrev = gimm.beat;
         switch (branch) {
             .doStop => {
-                time += gim.value;
+                time += gimm.value;
                 i_s += 1;
             },
             .doBpm => {
-                bpmPrev = gim.value;
+                bpmPrev = gimm.value;
                 i_b += 1;
             },
         }
     }
+    return summary;
 }
 
 /// Gimmicks have the string format:
 /// <beat>=<value>,<beat>=<value>,...
-fn parseGimmick(stops: []Gimmick, data: []const u8) ![]Gimmick {
+fn parseGimmick(gimType: GimmickType, gimms: []Gimmick, data: []const u8) ![]Gimmick {
+    log.debug("Parsing {s}:{s}", .{ @tagName(gimType), data });
     var it = std.mem.splitScalar(u8, data, ',');
     var i_gim: u16 = 0;
     while (it.next()) |gimStr| : (i_gim += 1) {
         const i_eq = std.mem.indexOf(u8, gimStr, "=").?;
-        var gim = &stops[i_gim];
+        var gim = &gimms[i_gim];
+        gim.type = gimType;
         gim.beat = try std.fmt.parseFloat(@TypeOf(gim.beat), gimStr[0..i_eq]);
         gim.value = try std.fmt.parseFloat(@TypeOf(gim.value), gimStr[i_eq + 1 ..]);
         log.debug("{}:{s} -> {d:.0},{d:.2}", .{ i_gim, gimStr, gim.beat, gim.value });
     }
-    log.debug("{} stops found.", .{i_gim});
-    return stops[0..i_gim];
+    log.debug("{} {s}s found.", .{ i_gim, @tagName(gimType) });
+    return gimms[0..i_gim];
 }
 
 fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) ?*Chart {
@@ -338,6 +517,7 @@ fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) ?*Char
             },
             5 => {
                 chart.notes = parseMeasures(chart.notes, subsection);
+                chart.measures = chart.notes[chart.notes.len - 1].measure + 1;
             },
             else => {
                 log.err("Too many ':' found in #NOTES section", .{});
@@ -356,30 +536,30 @@ fn parseMeasures(notes: []Note, data: []const u8) []Note {
     while (measureIt.next()) |measureRaw| : (i_meas += 1) {
         const measure = std.mem.trim(u8, measureRaw, " \r\n\t");
 
-        var denominator: u8 = @intCast(std.mem.count(u8, measure, "\n"));
+        const denominator: u8 = 1 + @as(u8, @intCast(std.mem.count(u8, measure, "\n")));
         var lineIt = std.mem.splitScalar(u8, measure, '\n');
-        var numerator: u8 = 1;
+        var numerator: u8 = 0;
         while (lineIt.next()) |line| : (numerator += 1) {
-            for (line, 0..) |c, column| {
-                switch (c) {
+            for (line[0..4], 0..4) |char, col| {
+                switch (char) {
                     '0', '\r' => {},
-                    '\n' => {
-                        denominator += 1;
-                    },
+                    '\n' => {},
                     '1', '2', '3', '4', 'M', 'F' => {
-                        notes[i_note].type = @enumFromInt(c);
+                        notes[i_note].column = @as(u8, 1) << @as(u3, @truncate(col));
+                        notes[i_note].type = @enumFromInt(char);
+                        notes[i_note].measure = i_meas;
                         notes[i_note].denominator = denominator;
                         notes[i_note].numerator = numerator;
-                        notes[i_note].column = @intCast(column);
                         i_note += 1; // next note
                     },
                     else => {
-                        log.err("unexpected '{c}'\n", .{c});
+                        log.err("unexpected '{c}'\n", .{char});
                         unreachable;
                     },
                 }
             }
         }
     }
-    return notes;
+    log.debug("Parsed {d} notes\n", .{i_note});
+    return notes[0..i_note];
 }
