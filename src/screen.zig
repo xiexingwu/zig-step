@@ -28,7 +28,14 @@ pub const Px = struct {
             .y = @intFromFloat(pt.y * height),
         };
     }
+
 };
+
+/// Get pix length relative to screen height
+pub fn toPx(scalar: f32) i32 {
+    const height: f32 = @floatFromInt(dims.height);
+    return @intFromFloat(scalar * height);
+}
 
 /// Screen normalised coordinate
 pub const Pt = struct {

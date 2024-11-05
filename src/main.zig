@@ -61,7 +61,7 @@ pub fn main() anyerror!void {
     //     Menu, Options, Browse, Play
     // };
     // var gameState: GameState = .Play;
-    try play.init(arenaAllocator, music, simfile.chart);
+    try play.init(arenaAllocator, music, simfile, playMode);
     defer play.deinit();
 
     // Main game loop
@@ -78,6 +78,7 @@ pub fn main() anyerror!void {
         }
         appState.showDebug = if (rl.isKeyReleased(.key_f)) !appState.showDebug else appState.showDebug;
 
+        play.updateBeat();
         play.judgeArrows();
         //----------------------------------------------------------------------------------
         // Draw
@@ -87,6 +88,7 @@ pub fn main() anyerror!void {
 
         rl.clearBackground(rl.Color.black);
 
+        play.drawArrows();
         play.drawLane();
 
         play.drawTimePlayedMsg();

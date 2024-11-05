@@ -6,6 +6,8 @@ const Allocator = std.mem.Allocator;
 
 const rl = @import("raylib");
 
+const utils = @import("./utils.zig");
+
 const MAX_BEATS = 4 * 256; // Is 256 measures for ddr songs?
 const MAX_NOTES = 1024; // MAX360 CSP is 1000
 const MAX_SIMFILE_BYTES = 256 * 1024; // At time of writing, largest DDR simfile is Fascination MAXX @ 137kB
@@ -199,12 +201,7 @@ pub const Note0 = Note{};
 // const Beat = struct {
 //     timeArrival: f32 = 0, // relevant in CMOD
 // };
-pub fn beatToTime(beat: f32, bpm: f32) f32 {
-    return beat / bpm * 60;
-}
-pub fn timetoBeat(time: f32, bpm: f32) f32 {
-    return bpm * time / 60;
-}
+const beatToTime = utils.beatToTime;
 
 /// Parse SM simfile.
 pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: PlayMode) !*Simfile {
@@ -577,7 +574,7 @@ fn parseMeasures(notes: []Note, data: []const u8) []Note {
                     '0', '\r' => {},
                     '\n' => {},
                     '1', '2', '3', '4', 'M', 'F' => {
-                        notes[i_note].column = @as(u8, 1) << @as(u3, @truncate(col));
+                        notes[i_note].column = @as(u8, 1) << (3 - @as(u3, @truncate(col)));
                         notes[i_note].type = @enumFromInt(char);
                         notes[i_note].measure = i_meas;
                         notes[i_note].denominator = denominator;

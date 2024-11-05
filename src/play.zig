@@ -8,7 +8,9 @@ const rl = @import("raylib");
 
 const sm = @import("./simfile.zig");
 const screen = @import("./screen.zig");
+const utils = @import("./utils.zig");
 
+const TARGET_OFFSET = 0.162 - ARROW_DIMS / 2.0;
 const ARROW_DIMS = 0.15;
 
 const Arrow = struct {
@@ -29,6 +31,22 @@ const Arrow = struct {
         miss: f32,
     };
     const Judgment = std.meta.FieldEnum(JudgmentTypes);
+
+    pub fn drawArrow(self: Arrow) void {
+        const distance = beatToDist(self.beat - state.beat, state.playMode.modValue);
+        if (TARGET_OFFSET + distance > 1) return;
+
+        const yPos = screen.toPx(TARGET_OFFSET + distance);
+        const noteWidth = screen.toPx(ARROW_DIMS);
+        const xPos = switch (self.note.column) {
+            8 => 0,
+            4 => noteWidth,
+            2 => 2 * noteWidth,
+            1 => 3 * noteWidth,
+            else => 3 / 2 * noteWidth,
+        };
+        rl.drawTexture(self.texture, xPos, yPos, rl.Color.white);
+    }
 
     pub fn judge(self: Arrow, time: f32) ?Judgment {
         var keys: u8 = 0;
@@ -66,16 +84,23 @@ const LaneComponent = struct {
 
 const State = struct {
     allocator: Allocator,
+
     music: rl.Music,
     musicLength: f32,
     musicEnded: bool = false,
-    chart: sm.Chart,
+
+    playMode: sm.PlayMode,
+
+    simfile: *sm.Simfile,
 
     // Textures
     arrows: []Arrow,
-    i_nextArrow: usize = 0, // Track index of next unjudged arrow
-
     laneComponents: []LaneComponent,
+
+    // Track indices
+    i_nextArrow: usize = 0, // Next unjudged arrow
+    i_nextGimm: usize = 0, // Next gimmick
+
     // Song state from last frame
     bpm: f32 = 0,
     beat: f32 = 0,
@@ -85,13 +110,17 @@ const State = struct {
 var state: State = undefined;
 
 /// Initialise Gameplay State
-pub fn init(allocator: Allocator, music: rl.Music, chart: sm.Chart) !void {
+pub fn init(allocator: Allocator, music: rl.Music, simfile: *sm.Simfile, playMode: sm.PlayMode) !void {
     state = State{
         .allocator = allocator,
+
         .music = music,
         .musicLength = rl.getMusicTimeLength(music),
-        .chart = chart,
-        .arrows = try initArrows(allocator, chart.notes),
+
+        .simfile = simfile,
+        .playMode = playMode,
+
+        .arrows = try initArrows(allocator, simfile.chart.notes),
         .laneComponents = try initLaneComponents(allocator),
     };
 }
@@ -99,18 +128,9 @@ pub fn init(allocator: Allocator, music: rl.Music, chart: sm.Chart) !void {
 fn initArrows(allocator: Allocator, notes: []sm.Note) ![]Arrow {
     var arrows = try allocator.alloc(Arrow, notes.len);
     // var buf: [16]u8 = undefined;
-    var baseArrow = genBaseArrow();
-    defer rl.unloadImage(baseArrow);
     for (notes, 0..) |note, i| {
-        // print("note {d}, m{d: >2} b{d: >3}/{d: <3}: {c} @ {s} @ b {d: >6.2} {d: >5.2}s\n", .{
-        //     i,                    note.measure,
-        //     note.numerator,       note.denominator,
-        //     note.getColumnChar(), @tagName(note.type),
-        //     note.getSongBeat(),   note.time,
-        // });
-        // const str = std.fmt.bufPrintZ(&buf, "{d: >4.0}", .{i}) catch "0";
-        // const baseArrow = rl.genImageText(40, 40, str);
-        // defer rl.unloadImage(img);
+        var baseArrow = genBaseArrow();
+        defer rl.unloadImage(baseArrow);
         rl.imageColorTint(&baseArrow, note.getColor());
         const texture = rl.loadTextureFromImage(baseArrow);
         arrows[i] = .{
@@ -119,17 +139,6 @@ fn initArrows(allocator: Allocator, notes: []sm.Note) ![]Arrow {
             .time = note.time,
             .texture = texture,
         };
-        // arrows[i].note = note;
-        // arrows[i].beat = note.getSongBeat();
-        // arrows[i].time = note.time;
-        // arrows[i].texture = texture;
-        // arrows[i].judgment = .nil;
-        // print("arrow {d}:@ b {d: >6.2} {d: >5.2}s judged {s}\n", .{
-        //     i,
-        //     arrows[i].beat,
-        //     arrows[i].time,
-        //     @tagName(arrows[i].judgment),
-        // });
     }
     return arrows;
 }
@@ -177,43 +186,80 @@ pub fn deinit() void {
 
 /// Check the song has ended
 pub fn hasSongEnded() bool {
-    const timePlayed = rl.getMusicTimePlayed(state.music);
+    const time = rl.getMusicTimePlayed(state.music);
     // Dirty hack to check song finished the first time and prevent it
     // from looping. timePlayed cannot line up with musicLength
     // exactly, hence cull it at the beginning of the loop.
-    if (timePlayed >= 0.99 * state.musicLength) state.musicEnded = true;
-    if (state.musicEnded) return timePlayed < 5 or timePlayed > state.musicLength;
+    if (time >= 0.99 * state.musicLength) state.musicEnded = true;
+    if (state.musicEnded) return time < 5 or time > state.musicLength;
     return false;
 }
 
 /// Given current beat # of song and velocity of notes, converts a beat to
 /// distance to the step target.
-pub fn beat2Distance(beat: f32, velocity: f32) f32 {
+pub fn beatToDist(beat: f32, mmod: f32) f32 {
     const DIST_PER_BEAT = 0.1315;
-    return velocity * beat * DIST_PER_BEAT;
+    return mmod * beat * DIST_PER_BEAT;
 }
 
 /// Determines the current beat # of the song
-pub fn updateBeat(time: f32) void {
-    const dt = time - state.time;
-    const beat = state.beat + sm.timeToBeat(dt, state.bpm);
+pub fn updateBeat() void {
+    const time = rl.getMusicTimePlayed(state.music);
 
-    // Split beat if gimmick appeared between last beast and now.
-    const bpms = state.chart.bpms;
-    const gimm = bpms[0];
-    assert(gimm.type == .bpm);
-    if (gimm.beat > state.beat and gimm.beat < beat) {
-        updateBeat(gimm.time);
-        state.bpm = gimm.value;
-        state.chart.bpms = state.chart.bpms[1..];
+    const dt = time - state.time;
+    var db = utils.timeToBeat(dt, state.bpm);
+    // print("time {d:.3}->{d:.3}s beat: {d:.2}\n", .{ state.time, time, state.beat });
+
+    // Split beat if bpm gimmick appeared between last beast and now.
+    const gimms = state.simfile.summary.gimms;
+
+    const i = &state.i_nextGimm;
+    while (i.* < gimms.len) : (i.* += 1) {
+        const gimm = gimms[i.*];
+        if (gimm.time > time) break; // don't need to deal with this gimmick yet
+
+        // Initialise song bpm
+        if (i.* == 0) {
+            assert(gimm.type == .bpm and gimm.beat == 0.0);
+            state.bpm = gimm.value;
+            log.debug("set BPM {d:.2}", .{state.bpm});
+            continue;
+        }
+
+        switch (gimm.type) {
+            // Pause beating until song catches up to end of stop
+            .stop => {
+                if (time < gimm.time + gimm.value) {
+                    db = 0;
+                    break;
+                }
+            },
+
+            // Update bpm (split beat if necessary)
+            .bpm => {
+                // const dt1 = gimm.time - state.time;
+                const dt2 = time - gimm.time;
+                db -= utils.timeToBeat(dt2, state.bpm);
+                db += utils.timeToBeat(dt2, gimm.value);
+
+                state.bpm = gimm.value;
+                continue;
+            },
+            .nil => {
+                log.err("Found unitialized gimmick when updating beaet.", .{});
+                unreachable;
+            },
+        }
     }
+
+    state.time = time;
+    state.beat += db;
 }
 
 pub fn judgeArrows() void {
     const i = &state.i_nextArrow;
     const arrows = state.arrows;
     const time = rl.getMusicTimePlayed(state.music);
-    print("{}/{}\n", .{ i.*, arrows.len });
     while (i.* < arrows.len) {
         var arrow = &arrows[i.*];
         if (arrow.judge(time)) |judgment| {
@@ -225,21 +271,10 @@ pub fn judgeArrows() void {
             break;
         }
     }
-    // for (arrows) |*arrow| {
-    //     // log.debug("pre-judge: arrow {d} @ b{d: >6.2}, {d: >6.2}s @ {d: >6.2}s judged {s}", .{ i, arrow.beat, arrow.time, time, @tagName(arrow.judgment) });
-    //     if (arrow.judge(time)) |judgment| {
-    //         arrow.judgment = judgment;
-    //         log.debug("arrow {d} @ b{d: >6.2}, {d: >6.2}s @ {d: >6.2}s judged {s}", .{ i, arrow.beat, arrow.time, time, @tagName(judgment) });
-    //         state.arrows = arrows[i + 1 ..];
-    //     } else {
-    //         break;
-    //     }
-    // }
 }
 
 //// DRAW functions
 pub fn drawLane() void {
-    const TARGET_OFFSET = 0.162 - ARROW_DIMS / 2.0;
     for (state.laneComponents) |component| {
         switch (component.type) {
             .target => {
@@ -250,33 +285,24 @@ pub fn drawLane() void {
     }
 }
 
-fn drawArrow(note: sm.Note) void {
-    _ = note;
-}
-
 pub fn drawArrows() void {
     const arrows = state.arrows[state.i_nextArrow..];
-    for (arrows, 0..) |note, i| {
-        assert(note.judgment == .nil);
-        if (note.judgment != .nil) {
-            state.chart.notes = state.chart.notes[i + 1 ..];
-            rl.unloadTexture();
-            continue;
-        }
-        drawArrow(note);
+    for (arrows) |arrow| {
+        assert(arrow.judgment == .nil);
+        arrow.drawArrow();
     }
 }
 
 pub fn drawTimePlayedMsg() void {
-    const timePlayed = rl.getMusicTimePlayed(state.music);
+    const time = rl.getMusicTimePlayed(state.music);
     var buf: [32]u8 = undefined;
     const msg = std.fmt.bufPrintZ(
         &buf,
         "{d:0>2.0}:{d:0>2.0}.{d:0>2.0}",
         .{
-            @divTrunc(timePlayed, 60),
-            @rem(timePlayed, 60),
-            @rem(timePlayed, 1) * 100,
+            @divTrunc(time, 60),
+            @rem(time, 60),
+            @rem(time, 1) * 100,
         },
     ) catch "00:00";
     rl.drawText(msg, rl.getScreenWidth() - 60, 10, 14, rl.Color.white);
@@ -284,7 +310,7 @@ pub fn drawTimePlayedMsg() void {
 
 //// Internal draw/img functions
 fn genBaseArrow() rl.Image {
-    const sz = screen.Px.fromPt(.{ .x = 0, .y = ARROW_DIMS }).y;
+    const sz = screen.toPx(ARROW_DIMS);
     var arrow = rl.genImageColor(sz, sz, rl.Color.white);
     rl.imageDrawCircle(
         &arrow,
