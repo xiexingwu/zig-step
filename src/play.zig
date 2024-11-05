@@ -82,15 +82,10 @@ const State = struct {
     time: f32 = 0,
 };
 
-// var state: *allowzero State = @ptrFromInt(0);
 var state: State = undefined;
 
 /// Initialise Gameplay State
 pub fn init(allocator: Allocator, music: rl.Music, chart: sm.Chart) !void {
-    // state = try allocator.create(State);
-    // state = .{
-    //
-    // }
     state = State{
         .allocator = allocator,
         .music = music,
@@ -170,10 +165,6 @@ fn initLaneComponents(allocator: Allocator) ![]LaneComponent {
 }
 
 pub fn deinit() void {
-    // if (@intFromPtr(state) == 0) {
-    //     log.err("play.deinit() called without state.", .{});
-    //     unreachable;
-    // }
     // arrows
     for (state.arrows) |arrow| {
         rl.unloadTexture(arrow.texture);
@@ -182,7 +173,6 @@ pub fn deinit() void {
     for (state.laneComponents) |component| {
         rl.unloadTexture(component.texture);
     }
-    // state.allocator.destroy(state);
 }
 
 /// Check the song has ended
