@@ -33,16 +33,18 @@ pub fn main() anyerror!void {
     //--------------------------------------------------------------------------------------
     const playMode = sm.PlayMode{
         .spdp = .Sp,
-        .diff = .Medium,
+        .diff = .Challenge,
         .mod = .mmod,
         .modValue = 2.6,
         .constant = null,
     };
 
+    // const title = "Electronics Sports Complex";
+    const title = "Gravity Collapse";
     //--------------------------------------------------------------------------------------
     // Load Music
     //--------------------------------------------------------------------------------------
-    const music: rl.Music = rl.loadMusicStream("./simfiles/Electronic Sports Complex/Electronic Sports Complex.ogg");
+    const music: rl.Music = rl.loadMusicStream("./simfiles/" ++ title ++ "/" ++ title ++ ".ogg");
     rl.playMusicStream(music);
 
     //--------------------------------------------------------------------------------------
@@ -54,7 +56,7 @@ pub fn main() anyerror!void {
     defer arena.deinit();
     const arenaAllocator = arena.allocator();
 
-    const filename = "./simfiles/Electronic Sports Complex/Electronic Sports Complex.sm";
+    const filename = "./simfiles/" ++ title ++ "/" ++ title ++ ".sm"; 
     const simfile = try sm.parseSimfileAlloc(arenaAllocator, filename, playMode);
 
     // const GameState = enum {
