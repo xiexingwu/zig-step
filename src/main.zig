@@ -1,20 +1,28 @@
 const std = @import("std");
-const rl = @import("raylib");
-const sm = @import("./simfile.zig");
-const play = @import("./play.zig");
 const assert = std.debug.assert;
 const print = std.debug.print;
+const log = std.log;
 
+const rl = @import("raylib");
+
+const sm = @import("./simfile.zig");
+const play = @import("./play.zig");
+const screen = @import("./screen.zig");
+
+const appState = struct {
+    var showDebug = true;
+};
 
 pub fn main() anyerror!void {
     //--------------------------------------------------------------------------------------
     // Initialization
     //--------------------------------------------------------------------------------------
-    const screenWidth = 800;
-    const screenHeight = 450;
+    screen.init();
+    defer screen.deinit();
 
-    rl.initWindow(screenWidth, screenHeight, "zig-step");
+    rl.initWindow(screen.dims.width, screen.dims.height, "zig-step");
     defer rl.closeWindow();
+
     rl.initAudioDevice();
     defer rl.closeAudioDevice();
 
@@ -26,13 +34,10 @@ pub fn main() anyerror!void {
     const playMode = sm.PlayMode{
         .spdp = .Sp,
         .diff = .Medium,
+        .mod = .mmod,
+        .modValue = 2.6,
+        .constant = null,
     };
-
-    //--------------------------------------------------------------------------------------
-    // Load Textures
-    //--------------------------------------------------------------------------------------
-    // const texture: rl.Texture = rl.Texture.init("path/to/texture.png");
-    // defer rl.unloadTexture(texture);
 
     //--------------------------------------------------------------------------------------
     // Load Music
@@ -57,30 +62,37 @@ pub fn main() anyerror!void {
     // };
     // var gameState: GameState = .Play;
     try play.init(arenaAllocator, music, simfile.chart);
+    defer play.deinit();
 
     // Main game loop
+    log.debug("-----STARTING GAME LOOP------", .{});
     while (!rl.windowShouldClose()) { // Detect window close button or ESC key
         //----------------------------------------------------------------------------------
         // Update
         //----------------------------------------------------------------------------------
         rl.updateMusicStream(music);
 
-        // TODO: instead check all notes finished to determine hasChartEnded
         if (play.hasSongEnded()) {
             rl.stopMusicStream(music);
             rl.closeWindow();
         }
+        appState.showDebug = if (rl.isKeyReleased(.key_f)) !appState.showDebug else appState.showDebug;
 
+        play.judgeArrows();
         //----------------------------------------------------------------------------------
         // Draw
         //----------------------------------------------------------------------------------
         rl.beginDrawing();
         defer rl.endDrawing();
 
-        rl.clearBackground(rl.Color.white);
+        rl.clearBackground(rl.Color.black);
 
-        rl.drawText(play.getTimePlayedMsg(), 190, 200, 20, rl.Color.light_gray);
-        rl.drawFPS(10, 10);
+        play.drawLane();
+
+        play.drawTimePlayedMsg();
+        if (appState.showDebug) {
+            screen.drawDebug();
+        }
         //----------------------------------------------------------------------------------
     }
 

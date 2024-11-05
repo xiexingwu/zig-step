@@ -4,6 +4,8 @@ const assert = std.debug.assert;
 const print = std.debug.print;
 const Allocator = std.mem.Allocator;
 
+const rl = @import("raylib");
+
 const MAX_BEATS = 4 * 256; // Is 256 measures for ddr songs?
 const MAX_NOTES = 1024; // MAX360 CSP is 1000
 const MAX_SIMFILE_BYTES = 256 * 1024; // At time of writing, largest DDR simfile is Fascination MAXX @ 137kB
@@ -13,7 +15,6 @@ const MAX_STOPS = 128; // Chaos TTM is 70(?)
 //// Types
 pub const Mod = enum {
     mmod,
-    constant,
     cmod,
 };
 
@@ -22,6 +23,7 @@ pub const PlayMode = struct {
     diff: Diff,
     mod: Mod = .mmod,
     modValue: f32 = 1.0,
+    constant: ?f32 = null,
 };
 
 pub const Simfile = struct {
@@ -82,15 +84,15 @@ pub const Chart = struct {
     modValue: f32,
     measures: u8,
 
-    beats: []Beat,
+    // beats: []Beat,
     notes: []Note,
     pub fn initAlloc(self: *Chart, allocator: Allocator) !void {
-        self.beats = try allocator.alloc(Beat, MAX_BEATS);
+        // self.beats = try allocator.alloc(Beat, MAX_BEATS);
         self.notes = try allocator.alloc(Note, MAX_NOTES);
     }
     pub fn new(allocator: Allocator) !Chart {
         var chart = try allocator.create(Chart);
-        chart.beats = try allocator.alloc(Beat, MAX_BEATS);
+        // chart.beats = try allocator.alloc(Beat, MAX_BEATS);
         chart.notes = try allocator.alloc(Note, MAX_NOTES);
         return chart.*;
     }
@@ -124,9 +126,7 @@ pub const Note = struct {
     denominator: u8 = 0, // # of lines measure is broken into: 4 = quarter notes, 8 = eighth notes etc.
     numerator: u8 = 0, // line of appearance (0-indexed)
     measure: u8 = 0, // measure (0-indexed)
-    timeArrival: f32 = 0, // arrival time (sec)
-
-    judgment: Judgment = .nil,
+    time: f32 = 0, // arrival time (sec)
 
     pub fn getColumnChar(self: Note) u8 {
         return switch (self.column) {
@@ -142,15 +142,46 @@ pub const Note = struct {
         };
     }
 
-    const Judgment = enum {
-        nil,
-        marvelous,
-        perfect,
-        great,
-        good,
-        ok,
-        miss,
-    };
+    pub fn getMeasBeat(self: Note) f32 {
+        const den: f32 = @floatFromInt(self.denominator);
+        const num: f32 = @floatFromInt(self.numerator);
+        return 4.0 * num / den;
+    }
+
+    pub fn getSongBeat(self: Note) f32 {
+        const meas: f32 = @floatFromInt(self.measure);
+        return 4.0 * meas + getMeasBeat(self);
+    }
+
+    pub fn getColor(self: Note) rl.Color {
+        const subdivs = self.denominator / 4; // subdivisions of a sigle beat
+        const measBeat = 4 * self.numerator / self.denominator;
+        const subdiv = self.numerator - measBeat * subdivs; // Find which subdiv note is in
+        if (subdiv == 0) return rl.Color.red;
+
+        const gcd = std.math.gcd(subdiv, subdivs);
+        // Examples:
+        // subdivs: 2 - b
+        // subdivs: 3 - g G
+        // subdivs: 4 - y b y
+        //     gcd:     1 2 1
+        // subdivs: 8 - o y o b o y o
+        //     gcd:     1 2 1 4 1 2 1
+        //   quant:     8 4 8 2 8 4 8
+        // subdivs: 12 - x g y G x b x g y G x
+        //     gcd:      1 2 3 4 1 6 1 4 3 2 1
+        //   quant:      x 6 4 3 x 2 x 3 4 6 x
+        const quant = subdivs / gcd;
+        return switch (quant) {
+            2 => rl.Color.blue,
+            3 => rl.Color.green,
+            4 => rl.Color.yellow,
+            6 => rl.Color.sky_blue,
+            8 => rl.Color.orange,
+            else => rl.Color.dark_green,
+        };
+    }
+
     const NoteType = enum(u8) {
         sentinel = '0',
         note,
@@ -165,11 +196,14 @@ pub const Note = struct {
 pub const Note0 = Note{};
 
 // const Beat0 = Beat{};
-const Beat = struct {
-    timeArrival: f32 = 0, // relevant in CMOD
-};
-fn beatToTime(beat: f32, bpm: f32) f32 {
+// const Beat = struct {
+//     timeArrival: f32 = 0, // relevant in CMOD
+// };
+pub fn beatToTime(beat: f32, bpm: f32) f32 {
     return beat / bpm * 60;
+}
+pub fn timetoBeat(time: f32, bpm: f32) f32 {
+    return bpm * time / 60;
 }
 
 /// Parse SM simfile.
@@ -305,15 +339,13 @@ fn timeNotes(simfile: *Simfile) *Simfile {
                 // Check next note is for this measure
                 if (note.measure > meas) break;
                 // Check next note is for this beat in the measure
-                const den: f32 = @floatFromInt(note.denominator);
-                const num: f32 = @floatFromInt(note.numerator);
-                const beatNote = 4.0 * num / den;
+                const beatNote = note.getMeasBeat();
                 if (beatNote > beatMeas) break;
 
                 // We now know beatMeas will be split by the note.
                 defer {
                     time += beatToTime(beatNote - beatPrev, bpm);
-                    note.timeArrival = time;
+                    note.time = time;
                     beatPrev = beatNote;
                     print("m{d: >2} b{d: >3}/{d: <3} = {d: >5.2}: n{} @ {c} {s} @ {d:.2}s\n", .{
                         meas,
@@ -323,7 +355,7 @@ fn timeNotes(simfile: *Simfile) *Simfile {
                         i_note,
                         note.getColumnChar(),
                         @tagName(note.type),
-                        note.timeArrival,
+                        note.time,
                     });
                 }
 
