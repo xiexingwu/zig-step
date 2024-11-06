@@ -28,6 +28,7 @@ pub const PlayMode = struct {
     constant: ?f32 = null, // ms until note should show
 
     autoplay: bool = true,
+    assistClap: bool = true,
 };
 
 pub const Simfile = struct {

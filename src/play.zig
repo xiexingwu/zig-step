@@ -54,7 +54,7 @@ const Arrow = struct {
         var tint = rl.Color.white;
         if (state.playMode.constant) |constant| {
             const timeUntil = self.time - time;
-            var constAlpha = ( constant / 1000.0 - timeUntil) / UNFADE_TIME;
+            var constAlpha = (constant / 1000.0 - timeUntil) / UNFADE_TIME;
             constAlpha = @max(0, @min(1, constAlpha));
             tint = rl.fade(tint, constAlpha);
         }
@@ -81,7 +81,12 @@ const Arrow = struct {
         const correct = keys == self.note.column;
 
         // TODO: Make this programmatic via JudgmentTypes
-        if (state.playMode.autoplay and @abs(timing) <= 0.0167) return .marvelous;
+        if (state.playMode.autoplay and @abs(timing) <= 0.0167) {
+            if (state.playMode.assistClap) {
+                rl.playSound(clap);
+            }
+            return .marvelous;
+        }
         if (correct and @abs(timing) <= 0.0167) return .marvelous;
         if (correct and @abs(timing) <= 0.033) return .perfect;
         if (correct and @abs(timing) <= 0.092) return .great;
@@ -124,6 +129,8 @@ const State = struct {
 
 var state: State = undefined;
 
+var clap: rl.Sound = undefined;
+
 /// Initialise Gameplay State
 pub fn init(allocator: Allocator, music: rl.Music, simfile: *sm.Simfile, playMode: sm.PlayMode) !void {
     state = State{
@@ -138,6 +145,7 @@ pub fn init(allocator: Allocator, music: rl.Music, simfile: *sm.Simfile, playMod
         .arrows = try initArrows(allocator, simfile.chart.notes),
         .laneComponents = try initLaneComponents(allocator),
     };
+    clap = rl.loadSound("./resources/clap.ogg");
 }
 
 fn initArrows(allocator: Allocator, notes: []sm.Note) ![]Arrow {
@@ -189,6 +197,7 @@ fn initLaneComponents(allocator: Allocator) ![]LaneComponent {
 }
 
 pub fn deinit() void {
+    rl.unloadSound(clap);
     // arrows
     for (state.arrows) |arrow| {
         rl.unloadTexture(arrow.texture);
