@@ -26,6 +26,8 @@ pub const PlayMode = struct {
     mod: Mod = .mmod,
     modValue: f32 = 1.0,
     constant: ?f32 = null, // ms until note should show
+
+    autoplay: bool = true,
 };
 
 pub const Simfile = struct {

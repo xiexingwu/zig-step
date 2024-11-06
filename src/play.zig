@@ -81,6 +81,7 @@ const Arrow = struct {
         const correct = keys == self.note.column;
 
         // TODO: Make this programmatic via JudgmentTypes
+        if (state.playMode.autoplay and @abs(timing) <= 0.0167) return .marvelous;
         if (correct and @abs(timing) <= 0.0167) return .marvelous;
         if (correct and @abs(timing) <= 0.033) return .perfect;
         if (correct and @abs(timing) <= 0.092) return .great;
