@@ -10,7 +10,16 @@ const play = @import("./play.zig");
 const screen = @import("./screen.zig");
 
 const appState = struct {
-    var showDebug = true;
+    pub var showDebug = true;
+    pub var masterVolume: f32 = 0.5;
+
+    pub var playMode = sm.PlayMode{
+        .spdp = .Sp,
+        .diff = .Challenge,
+        .mod = .mmod,
+        .modValue = 3.5,
+        .constant = 600,
+    };
 };
 
 pub fn main() anyerror!void {
@@ -31,13 +40,7 @@ pub fn main() anyerror!void {
     //--------------------------------------------------------------------------------------
     // Load User/Play config
     //--------------------------------------------------------------------------------------
-    const playMode = sm.PlayMode{
-        .spdp = .Sp,
-        .diff = .Challenge,
-        .mod = .mmod,
-        .modValue = 3.5,
-        .constant = 600,
-    };
+    const playMode = &appState.playMode;
 
     // const title = "Electronics Sports Complex";
     const title = "Gravity Collapse";
@@ -56,7 +59,7 @@ pub fn main() anyerror!void {
     defer arena.deinit();
     const arenaAllocator = arena.allocator();
 
-    const filename = "./simfiles/" ++ title ++ "/" ++ title ++ ".sm"; 
+    const filename = "./simfiles/" ++ title ++ "/" ++ title ++ ".sm";
     const simfile = try sm.parseSimfileAlloc(arenaAllocator, filename, playMode);
 
     // const GameState = enum {
@@ -80,6 +83,8 @@ pub fn main() anyerror!void {
         }
         appState.showDebug = if (rl.isKeyReleased(.key_f)) !appState.showDebug else appState.showDebug;
 
+        updateAppState();
+
         play.updateBeat();
         play.judgeArrows();
         //----------------------------------------------------------------------------------
@@ -95,10 +100,20 @@ pub fn main() anyerror!void {
 
         play.drawTimePlayedMsg();
         if (appState.showDebug) {
-            screen.drawDebug();
+            screen.drawDebug(appState);
         }
         //----------------------------------------------------------------------------------
     }
 
     _ = arena.reset(.retain_capacity);
+}
+
+fn updateAppState() void {
+    if (rl.isKeyPressed(.key_j)) appState.masterVolume -= 0.05;
+    if (rl.isKeyPressed(.key_k)) appState.masterVolume += 0.05;
+    appState.masterVolume = @max(0, @min(1, appState.masterVolume));
+    rl.setMasterVolume(appState.masterVolume);
+
+    if (rl.isKeyPressed(.key_h)) appState.playMode.modValue -= 0.25;
+    if (rl.isKeyPressed(.key_l)) appState.playMode.modValue += 0.25;
 }

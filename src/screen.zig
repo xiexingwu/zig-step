@@ -28,7 +28,6 @@ pub const Px = struct {
             .y = @intFromFloat(pt.y * height),
         };
     }
-
 };
 
 /// Get pix length relative to screen height
@@ -62,22 +61,43 @@ pub fn init() void {
 
 pub fn deinit() void {}
 
-pub fn drawDebug() void {
+pub fn drawDebug(appState: anytype) void {
+    var buf: [128]u8 = undefined;
+    var len: usize = 0;
+
     const fps = rl.getFPS();
     const mousePx = Px{
         .x = rl.getMouseX(),
         .y = rl.getMouseY(),
     };
     const mousePt = mousePx.toPt();
+    const volume = appState.masterVolume;
+    const mod = @tagName(appState.playMode.mod);
+    const modValue = appState.playMode.modValue;
 
-    var buf: [64]u8 = undefined;
+    // FPS
+    len += (std.fmt.bufPrintZ(buf[len..], "FPS: {d: >3.0}\n", .{fps}) catch "FPS:  0\n").len;
 
-    const fpsStr = std.fmt.bufPrintZ(&buf, "FPS: {d: >3.0}\n", .{fps}) catch "FPS:  0\n";
-    _ = std.fmt.bufPrintZ(
-        buf[fpsStr.len..],
+    // Mouse loc
+    len += (std.fmt.bufPrintZ(
+        buf[len..],
         "X:{d: >4.0}, Y:{d: >4.0}\n" ++ "X:{d: >4.2}, Y:{d: >4.2}\n",
         .{ mousePx.x, mousePx.y, mousePt.x, mousePt.y },
-    ) catch "X:+  0, Y:+   0\nX:+0.00, Y:+0.00";
+    ) catch "X:+  0, Y:+   0\nX:+0.00, Y:+0.00").len;
 
-    rl.drawText(fpsStr, 10, 10, 14, rl.Color.green);
+    // Volume
+    len += (std.fmt.bufPrintZ(
+        buf[len..],
+        "Volume: {d: >3.0}%\n",
+        .{volume * 100},
+    ) catch "   ").len;
+
+    // Mod
+    len += (std.fmt.bufPrintZ(
+        buf[len..],
+        "{s}: {d: >4.2}\n",
+        .{mod, modValue},
+    ) catch "   ").len;
+
+    rl.drawText(buf[0..len :0], 10, 10, 14, rl.Color.green);
 }

@@ -166,6 +166,13 @@ pub const Note = struct {
             .sentinel => unreachable,
             else => {},
         }
+
+        // Special handling for cases when there are no eighth notes:
+        // Currently only 1/3 notes for 6-row measures
+        if (self.denominator % 4 > 0) {
+            return if (self.numerator % 3 == 0) rl.Color.red else rl.Color.green;
+        }
+
         const subdivs = self.denominator / 4; // subdivisions of a sigle beat
         const measBeat = 4 * self.numerator / self.denominator;
         const subdiv = self.numerator - measBeat * subdivs; // Find which subdiv note is in
@@ -214,7 +221,7 @@ pub const Note0 = Note{};
 const beatToTime = utils.beatToTime;
 
 /// Parse SM simfile.
-pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: PlayMode) !*Simfile {
+pub fn parseSimfileAlloc(allocator: Allocator, filename: []const u8, playMode: *PlayMode) !*Simfile {
     //// Alternative allocation
     // const simfile = try allocator.create(Simfile);
     // try simfile.initAlloc(allocator);
@@ -519,7 +526,7 @@ fn parseGimmick(gimType: GimmickType, gimms: []Gimmick, data: []const u8) ![]Gim
     return gimms[0..i_gim];
 }
 
-fn parseNotesSection(chart: *Chart, data: []const u8, playMode: PlayMode) ?*Chart {
+fn parseNotesSection(chart: *Chart, data: []const u8, playMode: *PlayMode) ?*Chart {
     var it = std.mem.splitScalar(u8, data, ':');
     // Expect 6 subsections:
     //  0.sp/dp

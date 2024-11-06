@@ -109,7 +109,7 @@ const State = struct {
     musicLength: f32,
     musicEnded: bool = false,
 
-    playMode: sm.PlayMode,
+    playMode: *sm.PlayMode,
 
     simfile: *sm.Simfile,
 
@@ -132,7 +132,7 @@ var state: State = undefined;
 var clap: rl.Sound = undefined;
 
 /// Initialise Gameplay State
-pub fn init(allocator: Allocator, music: rl.Music, simfile: *sm.Simfile, playMode: sm.PlayMode) !void {
+pub fn init(allocator: Allocator, music: rl.Music, simfile: *sm.Simfile, playMode: *sm.PlayMode) !void {
     state = State{
         .allocator = allocator,
 
