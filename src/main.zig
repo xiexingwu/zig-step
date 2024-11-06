@@ -18,7 +18,7 @@ const appState = struct {
         .diff = .Challenge,
         .mod = .mmod,
         .modValue = 3.5,
-        .constant = 600,
+        .constant = 800,
     };
 };
 

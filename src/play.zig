@@ -10,8 +10,9 @@ const sm = @import("./simfile.zig");
 const screen = @import("./screen.zig");
 const utils = @import("./utils.zig");
 
-const ARROW_SIDE_LENGTH = 0.15;
-const TARGET_OFFSET = 0.162 - ARROW_SIDE_LENGTH / 2.0;
+const ARR_LNG = 0.15; // Side length of arrow, normalised by lane height
+var ARR_LNG_PX: i32 = undefined;
+const TARGET_OFFSET = 0.162 - ARR_LNG / 2.0;
 
 const Arrow = struct {
     note: sm.Note,
@@ -34,20 +35,12 @@ const Arrow = struct {
 
     pub fn drawArrow(self: Arrow) void {
         const time = rl.getMusicTimePlayed(state.music);
-        
+
         // Determine draw location
         const distance = beatToDist(self.beat - state.beat, state.playMode.modValue);
         if (TARGET_OFFSET + distance > 1) return;
 
         const yPos = screen.toPx(TARGET_OFFSET + distance);
-        const noteWidth = screen.toPx(ARROW_SIDE_LENGTH);
-        const xPos = switch (self.note.column) {
-            8 => 0,
-            4 => noteWidth,
-            2 => 2 * noteWidth,
-            1 => 3 * noteWidth,
-            else => 3 / 2 * noteWidth,
-        };
 
         // Apply CONSTANT fade
         const UNFADE_TIME = 0.2; // Time (s) to unfade the arrow
@@ -59,7 +52,8 @@ const Arrow = struct {
             tint = rl.fade(tint, constAlpha);
         }
 
-        rl.drawTexture(self.texture, xPos, yPos, tint);
+        // rl.drawTexture(self.texture, xPos, yPos, tint);
+        rl.drawTexture(self.texture, 0, yPos, tint);
     }
 
     pub fn judge(self: Arrow, time: f32) ?Judgment {
@@ -96,11 +90,6 @@ const Arrow = struct {
         // unreachable;
     }
 };
-const LaneComponentType = enum { target };
-const LaneComponent = struct {
-    type: LaneComponentType,
-    texture: rl.Texture,
-};
 
 const State = struct {
     allocator: Allocator,
@@ -115,7 +104,6 @@ const State = struct {
 
     // Textures
     arrows: []Arrow,
-    laneComponents: []LaneComponent,
 
     // Track indices
     i_nextArrow: usize = 0, // Next unjudged arrow
@@ -130,9 +118,30 @@ const State = struct {
 var state: State = undefined;
 
 var clap: rl.Sound = undefined;
+const baseArrowImgs = struct {
+    var L: rl.Image = undefined;
+    var R: rl.Image = undefined;
+    var U: rl.Image = undefined;
+    var D: rl.Image = undefined;
+
+    pub fn get(col: u3) rl.Image {
+        return switch (col) {
+            0, 4 => baseArrowImgs.R,
+            1, 5 => baseArrowImgs.U,
+            2, 6 => baseArrowImgs.D,
+            3, 7 => baseArrowImgs.L,
+        };
+    }
+};
+
+var laneTexture: rl.Texture = undefined;
 
 /// Initialise Gameplay State
 pub fn init(allocator: Allocator, music: rl.Music, simfile: *sm.Simfile, playMode: *sm.PlayMode) !void {
+    clap = rl.loadSound("./resources/clap.ogg");
+    initBaseArrowImgs();
+    initLane();
+
     state = State{
         .allocator = allocator,
 
@@ -143,19 +152,44 @@ pub fn init(allocator: Allocator, music: rl.Music, simfile: *sm.Simfile, playMod
         .playMode = playMode,
 
         .arrows = try initArrows(allocator, simfile.chart.notes),
-        .laneComponents = try initLaneComponents(allocator),
     };
-    clap = rl.loadSound("./resources/clap.ogg");
+}
+
+fn initBaseArrowImgs() void {
+    ARR_LNG_PX = screen.toPx(ARR_LNG);
+    var dn = rl.loadImage("./resources/down_receptor_dark_64.png");
+    rl.imageResize(&dn, ARR_LNG_PX, ARR_LNG_PX);
+
+    var lt = rl.imageCopy(dn);
+    rl.imageRotate(&lt, 90);
+
+    var up = rl.imageCopy(dn);
+    rl.imageRotate(&up, 180);
+
+    var rt = rl.imageCopy(dn);
+    rl.imageRotate(&rt, -90);
+
+    // baseArrowImgs = .{
+    baseArrowImgs.L = lt;
+    baseArrowImgs.D = dn;
+    baseArrowImgs.U = up;
+    baseArrowImgs.R = rt;
+    // };
+}
+
+fn deinitBaseArrowImgs() void {
+    rl.unloadImage(baseArrowImgs.L);
+    rl.unloadImage(baseArrowImgs.D);
+    rl.unloadImage(baseArrowImgs.U);
+    rl.unloadImage(baseArrowImgs.R);
 }
 
 fn initArrows(allocator: Allocator, notes: []sm.Note) ![]Arrow {
     var arrows = try allocator.alloc(Arrow, notes.len);
-    // var buf: [16]u8 = undefined;
     for (notes, 0..) |note, i| {
-        var baseArrow = genBaseArrow();
-        defer rl.unloadImage(baseArrow);
-        rl.imageColorTint(&baseArrow, note.getColor());
-        const texture = rl.loadTextureFromImage(baseArrow);
+        const img = genImageArrow(note);
+        defer rl.unloadImage(img);
+        const texture = rl.loadTextureFromImage(img);
         arrows[i] = .{
             .note = note,
             .beat = note.getSongBeat(),
@@ -166,45 +200,39 @@ fn initArrows(allocator: Allocator, notes: []sm.Note) ![]Arrow {
     return arrows;
 }
 
-fn initLaneComponents(allocator: Allocator) ![]LaneComponent {
-    var i: u8 = 0;
-    for (std.meta.fieldNames(LaneComponentType)) |_| {
-        i += 1;
-    }
-    const components = try allocator.alloc(LaneComponent, i);
-    for (components) |*component| {
-        switch (component.type) {
-            .target => {
-                const sz = screen.Px.fromPt(.{ .x = 1, .y = ARROW_SIDE_LENGTH });
-                var img = rl.genImageColor(sz.x, sz.y, rl.Color.blank);
-                defer rl.unloadImage(img);
+fn initLane() void {
+    const sz = screen.Px.fromPt(.{ .x = 1, .y = ARR_LNG });
+    var canvas = rl.genImageColor(sz.x, sz.y, rl.Color.blank);
+    defer rl.unloadImage(canvas);
 
-                rl.imageDrawLine(
-                    &img,
-                    0,
-                    @divTrunc(sz.y, 2),
-                    sz.x,
-                    @divTrunc(sz.y, 2),
-                    rl.Color.gray,
-                );
-                component.texture = rl.loadTextureFromImage(img);
+    rl.imageDrawLine(&canvas, 0, @divTrunc(sz.y, 2), sz.x, @divTrunc(sz.y, 2), rl.Color.gray);
 
-                log.debug("lane target size {}x{}, centred {}\n", .{ sz.x, sz.y, @divTrunc(sz.y, 2) });
-            },
-        }
+    for (0..4) |i| {
+        const col: u3 = @intCast(i);
+        const arrow = baseArrowImgs.get(col);
+
+        const xPos = (3 - col) * sz.y;
+        rl.imageDraw(
+            &canvas,
+            arrow,
+            .{ .x = 0, .y = 0, .width = @floatFromInt(canvas.width), .height = @floatFromInt(canvas.height) },
+            .{ .x = @floatFromInt(xPos), .y = 0, .width = @floatFromInt(sz.y), .height = @floatFromInt(sz.y) },
+            rl.Color.white,
+        );
     }
-    return components;
+
+    laneTexture = rl.loadTextureFromImage(canvas);
+
+    log.debug("lane target size {}x{}, centred {}\n", .{ sz.x, sz.y, @divTrunc(sz.y, 2) });
 }
 
 pub fn deinit() void {
+    rl.unloadTexture(laneTexture);
     rl.unloadSound(clap);
+    deinitBaseArrowImgs();
     // arrows
     for (state.arrows) |arrow| {
         rl.unloadTexture(arrow.texture);
-    }
-    // lane components
-    for (state.laneComponents) |component| {
-        rl.unloadTexture(component.texture);
     }
 }
 
@@ -302,14 +330,8 @@ pub fn judgeArrows() void {
 
 //// DRAW functions
 pub fn drawLane() void {
-    for (state.laneComponents) |component| {
-        switch (component.type) {
-            .target => {
-                const pos = (screen.Pt{ .x = 0, .y = TARGET_OFFSET }).toPx();
-                rl.drawTexture(component.texture, pos.x, pos.y, rl.Color.white);
-            },
-        }
-    }
+    const pos = (screen.Pt{ .x = 0, .y = TARGET_OFFSET }).toPx();
+    rl.drawTexture(laneTexture, pos.x, pos.y, rl.Color.white);
 }
 
 pub fn drawArrows() void {
@@ -336,11 +358,10 @@ pub fn drawTimePlayedMsg() void {
 }
 
 //// Internal draw/img functions
-fn genBaseArrow() rl.Image {
-    const sideLength = screen.toPx(ARROW_SIDE_LENGTH);
-    var arrow = rl.genImageColor(sideLength, sideLength, rl.Color.blank);
-    const centre = @divTrunc(sideLength, 2);
-    const radius = @divTrunc(sideLength, 3);
+fn genImageCircleArrow() rl.Image {
+    var arrow = rl.genImageColor(ARR_LNG_PX, ARR_LNG_PX, rl.Color.blank);
+    const centre = @divTrunc(ARR_LNG_PX, 2);
+    const radius = @divTrunc(ARR_LNG_PX, 3);
     rl.imageDrawCircle(
         &arrow,
         centre,
@@ -351,7 +372,33 @@ fn genBaseArrow() rl.Image {
 
     log.debug(
         "Base arrow size {}x{}, centred {},{}\n",
-        .{ sideLength, sideLength, @divTrunc(sideLength, 2), @divTrunc(sideLength, 2) },
+        .{ ARR_LNG_PX, ARR_LNG_PX, @divTrunc(ARR_LNG_PX, 2), @divTrunc(ARR_LNG_PX, 2) },
     );
     return arrow;
+}
+
+/// Loads a down arrow
+fn genImageArrow(note: sm.Note) rl.Image {
+    var canvas = rl.genImageColor(screen.dims.width, ARR_LNG_PX, rl.Color.blank);
+
+    for (0..4) |i| {
+        const col: u3 = @intCast(i);
+        if (note.column & @as(u8, 1) << (3 - col) == 0) {
+            continue;
+        }
+
+        const baseArrow = baseArrowImgs.get(col);
+
+        const xPos = (3 - col) * ARR_LNG_PX;
+        rl.imageDraw(
+            &canvas,
+            baseArrow,
+            .{ .x = 0, .y = 0, .width = @floatFromInt(canvas.width), .height = @floatFromInt(canvas.height) },
+            .{ .x = @floatFromInt(xPos), .y = 0, .width = @floatFromInt(ARR_LNG_PX), .height = @floatFromInt(ARR_LNG_PX) },
+            rl.Color.white,
+        );
+    }
+
+    rl.imageColorTint(&canvas, note.getColor());
+    return canvas;
 }

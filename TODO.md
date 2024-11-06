@@ -1,7 +1,7 @@
 # Correctness
 - [ ] Song offset -> add to chart/note, since it's invisible to rl.getMusicTimePlayed
 - [ ] Audio/Visual offset -> add to chart/note, since it's invisible to rl.getMusicTimePlayed
-- [ ] If BPM gimmick occurs between frames, correct beat in `updateBeat()`
+- [x] If BPM gimmick occurs between frames, correct beat in `updateBeat()`
 - [ ] Holds
 - [ ] Jumps
 - [ ] Shocks
