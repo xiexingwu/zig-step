@@ -25,7 +25,7 @@ pub const PlayMode = struct {
     diff: Diff,
     mod: Mod = .mmod,
     modValue: f32 = 1.0,
-    constant: ?f32 = null,
+    constant: ?f32 = null, // ms until note should show
 };
 
 pub const Simfile = struct {
@@ -156,6 +156,13 @@ pub const Note = struct {
     }
 
     pub fn getColor(self: Note) rl.Color {
+        switch (self.type) {
+            .tail, .roll, .mine, .fake => {
+                return rl.Color.blank;
+            },
+            .sentinel => unreachable,
+            else => {},
+        }
         const subdivs = self.denominator / 4; // subdivisions of a sigle beat
         const measBeat = 4 * self.numerator / self.denominator;
         const subdiv = self.numerator - measBeat * subdivs; // Find which subdiv note is in

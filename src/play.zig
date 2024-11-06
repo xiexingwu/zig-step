@@ -10,8 +10,8 @@ const sm = @import("./simfile.zig");
 const screen = @import("./screen.zig");
 const utils = @import("./utils.zig");
 
-const TARGET_OFFSET = 0.162 - ARROW_DIMS / 2.0;
-const ARROW_DIMS = 0.15;
+const ARROW_SIDE_LENGTH = 0.15;
+const TARGET_OFFSET = 0.162 - ARROW_SIDE_LENGTH / 2.0;
 
 const Arrow = struct {
     note: sm.Note,
@@ -33,11 +33,14 @@ const Arrow = struct {
     const Judgment = std.meta.FieldEnum(JudgmentTypes);
 
     pub fn drawArrow(self: Arrow) void {
+        const time = rl.getMusicTimePlayed(state.music);
+        
+        // Determine draw location
         const distance = beatToDist(self.beat - state.beat, state.playMode.modValue);
         if (TARGET_OFFSET + distance > 1) return;
 
         const yPos = screen.toPx(TARGET_OFFSET + distance);
-        const noteWidth = screen.toPx(ARROW_DIMS);
+        const noteWidth = screen.toPx(ARROW_SIDE_LENGTH);
         const xPos = switch (self.note.column) {
             8 => 0,
             4 => noteWidth,
@@ -45,7 +48,18 @@ const Arrow = struct {
             1 => 3 * noteWidth,
             else => 3 / 2 * noteWidth,
         };
-        rl.drawTexture(self.texture, xPos, yPos, rl.Color.white);
+
+        // Apply CONSTANT fade
+        const UNFADE_TIME = 0.2; // Time (s) to unfade the arrow
+        var tint = rl.Color.white;
+        if (state.playMode.constant) |constant| {
+            const timeUntil = self.time - time;
+            var constAlpha = ( constant / 1000.0 - timeUntil) / UNFADE_TIME;
+            constAlpha = @max(0, @min(1, constAlpha));
+            tint = rl.fade(tint, constAlpha);
+        }
+
+        rl.drawTexture(self.texture, xPos, yPos, tint);
     }
 
     pub fn judge(self: Arrow, time: f32) ?Judgment {
@@ -152,7 +166,7 @@ fn initLaneComponents(allocator: Allocator) ![]LaneComponent {
     for (components) |*component| {
         switch (component.type) {
             .target => {
-                const sz = screen.Px.fromPt(.{ .x = 1, .y = ARROW_DIMS });
+                const sz = screen.Px.fromPt(.{ .x = 1, .y = ARROW_SIDE_LENGTH });
                 var img = rl.genImageColor(sz.x, sz.y, rl.Color.blank);
                 defer rl.unloadImage(img);
 
@@ -264,7 +278,10 @@ pub fn judgeArrows() void {
         var arrow = &arrows[i.*];
         if (arrow.judge(time)) |judgment| {
             arrow.judgment = judgment;
-            log.debug("arrow {d} @ b{d: >6.2}, {d: >6.2}s @ {d: >6.2}s judged {s}", .{ i, arrow.beat, arrow.time, time, @tagName(judgment) });
+            log.debug(
+                "arrow {d} @ b{d: >6.2}, {d: >6.2}s @ {d: >6.2}s judged {s}",
+                .{ i.*, arrow.beat, arrow.time, time, @tagName(judgment) },
+            );
             rl.unloadTexture(arrow.texture);
             i.* += 1;
         } else {
@@ -310,25 +327,21 @@ pub fn drawTimePlayedMsg() void {
 
 //// Internal draw/img functions
 fn genBaseArrow() rl.Image {
-    const sz = screen.toPx(ARROW_DIMS);
-    var arrow = rl.genImageColor(sz, sz, rl.Color.white);
+    const sideLength = screen.toPx(ARROW_SIDE_LENGTH);
+    var arrow = rl.genImageColor(sideLength, sideLength, rl.Color.blank);
+    const centre = @divTrunc(sideLength, 2);
+    const radius = @divTrunc(sideLength, 3);
     rl.imageDrawCircle(
         &arrow,
-        @divTrunc(sz, 2),
-        @divTrunc(sz, 2),
-        @divTrunc(sz, 2),
+        centre,
+        centre,
+        radius,
         rl.Color.white,
     );
 
     log.debug(
         "Base arrow size {}x{}, centred {},{}\n",
-        .{ sz, sz, @divTrunc(sz, 2), @divTrunc(sz, 2) },
+        .{ sideLength, sideLength, @divTrunc(sideLength, 2), @divTrunc(sideLength, 2) },
     );
     return arrow;
-}
-
-/// Apply alpha to arrow for CONSTANT
-fn applyNoteConstantAlpha(note: *rl.Image, alpha: u32) *rl.Image {
-    const mask = rl.genImageColor(note.width, note.height, rl.Color(0, 0, 0, alpha));
-    return rl.imageAlphaMask(note, mask);
 }

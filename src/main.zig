@@ -35,8 +35,8 @@ pub fn main() anyerror!void {
         .spdp = .Sp,
         .diff = .Challenge,
         .mod = .mmod,
-        .modValue = 2.6,
-        .constant = null,
+        .modValue = 3.5,
+        .constant = 600,
     };
 
     // const title = "Electronics Sports Complex";
