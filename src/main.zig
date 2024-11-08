@@ -1,11 +1,9 @@
 const std = @import("std");
-const assert = std.debug.assert;
-const print = std.debug.print;
 const log = std.log;
 
 const rl = @import("raylib");
 
-const sm = @import("./simfile.zig");
+const Simfile = @import("./simfile/Simfile.zig");
 const play = @import("./play.zig");
 const screen = @import("./screen.zig");
 
@@ -13,7 +11,7 @@ const appState = struct {
     pub var showDebug = true;
     pub var masterVolume: f32 = 0.5;
 
-    pub var playMode = sm.PlayMode{
+    pub var playMode = play.PlayMode{
         .spdp = .Sp,
         .diff = .Challenge,
         .mod = .mmod,
@@ -60,7 +58,7 @@ pub fn main() anyerror!void {
     const arenaAllocator = arena.allocator();
 
     const filename = "./simfiles/" ++ title ++ "/" ++ title ++ ".sm";
-    const simfile = try sm.parseSimfileAlloc(arenaAllocator, filename, playMode);
+    const simfile = try Simfile.fromFile(arenaAllocator, filename, playMode);
 
     // const GameState = enum {
     //     Menu, Options, Browse, Play

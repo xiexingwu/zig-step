@@ -6,16 +6,54 @@ const print = std.debug.print;
 
 const rl = @import("raylib");
 
-const sm = @import("./simfile.zig");
+const Simfile = @import("./simfile/Simfile.zig");
+const play = @import("./play.zig");
 const screen = @import("./screen.zig");
-const utils = @import("./utils.zig");
+const utils = @import("./utils/utils.zig");
+
+pub const SpDp = enum {
+    Sp,
+    Dp,
+    pub fn toSmString(self: SpDp) []const u8 {
+        return switch (self) {
+            .Sp => "dance-single",
+            .Dp => "dance-double",
+        };
+    }
+};
+
+pub const Diff = enum {
+    Beginner,
+    Easy,
+    Medium,
+    Hard,
+    Challenge,
+    pub fn toSmString(self: Diff) []const u8 {
+        return @tagName(self);
+    }
+};
+pub const Mod = enum {
+    mmod,
+    cmod,
+};
+
+pub const PlayMode = struct {
+    spdp: play.SpDp,
+    diff: play.Diff,
+    mod: Mod = .mmod,
+    modValue: f32 = 1.0,
+    constant: ?f32 = null, // ms until note should show
+
+    autoplay: bool = true,
+    assistClap: bool = true,
+};
 
 const ARR_LNG = 0.15; // Side length of arrow, normalised by lane height
 var ARR_LNG_PX: i32 = undefined;
 const TARGET_OFFSET = 0.162 - ARR_LNG / 2.0;
 
 const Arrow = struct {
-    note: sm.Note,
+    note: Simfile.Note,
     beat: f32, // for MMOD
     time: f32, // for CMOD and judgment
     texture: rl.Texture,
@@ -52,7 +90,6 @@ const Arrow = struct {
             tint = rl.fade(tint, constAlpha);
         }
 
-        // rl.drawTexture(self.texture, xPos, yPos, tint);
         rl.drawTexture(self.texture, 0, yPos, tint);
     }
 
@@ -72,11 +109,11 @@ const Arrow = struct {
         if (timing < -0.142) return null; // short-circuit if note is far away
         if (timing > 0.142) return .miss;
 
-        const correct = keys == self.note.column;
+        const correct = keys == self.note.columns;
 
         // TODO: Make this programmatic via JudgmentTypes
         if (state.playMode.autoplay and @abs(timing) <= 0.0167) {
-            if (state.playMode.assistClap) {
+            if (state.playMode.assistClap and (self.note.type == .note or self.note.type == .hold)) {
                 rl.playSound(clap);
             }
             return .marvelous;
@@ -86,8 +123,6 @@ const Arrow = struct {
         if (correct and @abs(timing) <= 0.092) return .great;
         if (correct and @abs(timing) <= 0.142) return .good;
         return null;
-        // log.err("Note failed to judge in existing timing windows. timing = {d: >6.2}s", .{timing});
-        // unreachable;
     }
 };
 
@@ -98,9 +133,9 @@ const State = struct {
     musicLength: f32,
     musicEnded: bool = false,
 
-    playMode: *sm.PlayMode,
+    playMode: *PlayMode,
 
-    simfile: *sm.Simfile,
+    simfile: *Simfile,
 
     // Textures
     arrows: []Arrow,
@@ -137,7 +172,7 @@ const baseArrowImgs = struct {
 var laneTexture: rl.Texture = undefined;
 
 /// Initialise Gameplay State
-pub fn init(allocator: Allocator, music: rl.Music, simfile: *sm.Simfile, playMode: *sm.PlayMode) !void {
+pub fn init(allocator: Allocator, music: rl.Music, simfile: *Simfile, playMode: *PlayMode) !void {
     clap = rl.loadSound("./resources/clap.ogg");
     initBaseArrowImgs();
     initLane();
@@ -169,12 +204,10 @@ fn initBaseArrowImgs() void {
     var rt = rl.imageCopy(dn);
     rl.imageRotate(&rt, -90);
 
-    // baseArrowImgs = .{
     baseArrowImgs.L = lt;
     baseArrowImgs.D = dn;
     baseArrowImgs.U = up;
     baseArrowImgs.R = rt;
-    // };
 }
 
 fn deinitBaseArrowImgs() void {
@@ -184,7 +217,7 @@ fn deinitBaseArrowImgs() void {
     rl.unloadImage(baseArrowImgs.R);
 }
 
-fn initArrows(allocator: Allocator, notes: []sm.Note) ![]Arrow {
+fn initArrows(allocator: Allocator, notes: []Simfile.Note) ![]Arrow {
     var arrows = try allocator.alloc(Arrow, notes.len);
     for (notes, 0..) |note, i| {
         const img = genImageArrow(note);
@@ -263,7 +296,7 @@ pub fn updateBeat() void {
     // print("time {d:.3}->{d:.3}s beat: {d:.2}\n", .{ state.time, time, state.beat });
 
     // Split beat if bpm gimmick appeared between last beast and now.
-    const gimms = state.simfile.summary.gimms;
+    const gimms = state.simfile.chart.gimms;
 
     const i = &state.i_nextGimm;
     while (i.* < gimms.len) : (i.* += 1) {
@@ -378,12 +411,14 @@ fn genImageCircleArrow() rl.Image {
 }
 
 /// Loads a down arrow
-fn genImageArrow(note: sm.Note) rl.Image {
+fn genImageArrow(note: Simfile.Note) rl.Image {
     var canvas = rl.genImageColor(screen.dims.width, ARR_LNG_PX, rl.Color.blank);
 
+    log.err("This section breaks now that note.columns can have multiple active bits.", .{});
+    assert(false);
     for (0..4) |i| {
         const col: u3 = @intCast(i);
-        if (note.column & @as(u8, 1) << (3 - col) == 0) {
+        if (note.columns & @as(u8, 1) << (3 - col) == 0) {
             continue;
         }
 
