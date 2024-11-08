@@ -13,7 +13,7 @@ const appState = struct {
 
     pub var playMode = play.PlayMode{
         .spdp = .Sp,
-        .diff = .Challenge,
+        .diff = .Hard,
         .mod = .mmod,
         .modValue = 3.5,
         .constant = 800,
@@ -41,7 +41,8 @@ pub fn main() anyerror!void {
     const playMode = &appState.playMode;
 
     // const title = "Electronics Sports Complex";
-    const title = "Gravity Collapse";
+    // const title = "Gravity Collapse";
+    const title = "mathematical good-bye";
     //--------------------------------------------------------------------------------------
     // Load Music
     //--------------------------------------------------------------------------------------

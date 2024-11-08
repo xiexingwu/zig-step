@@ -33,7 +33,7 @@ pub fn fromFile(allocator: std.mem.Allocator, filename: []const u8, playMode: *p
     log.debug("Gimmicks:{d}", .{simfile.chart.gimms.len});
     log.debug("Bpms:{d}", .{simfile.chart.bpms.len});
     log.debug("Stops:{d}", .{simfile.chart.stops.len});
-    log.debug("Notes:{d}", .{simfile.chart.notes.len});
+    Simfile.Note.summariseNotes(simfile.chart.notes);
     log.debug("---------------", .{});
     return simfile;
 }

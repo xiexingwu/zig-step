@@ -29,21 +29,24 @@ pub fn parse(filename: []const u8, simfile: *Simfile) !*Simfile {
     var chartFound = false;
     // Iterate over one tag section at a time
     tag_blk: while (try reader.readUntilDelimiterOrEof(&readBuf, ';')) |section| {
-        // Prune comments (replace with space)
+        // Prune comments (replace with space and trim sides)
         while (std.mem.indexOf(u8, section, "//")) |i_com| {
             const i_nl = std.mem.indexOf(u8, section[i_com..], "\n").?;
             // const tmp = section[i_com..i_nl];
             @memset(section[i_com..i_nl], ' ');
         }
+        const trimmed = std.mem.trim(u8, section, " \r\n\t");
+        if (trimmed.len == 0) break :tag_blk;
 
         // Find pound and colon to split section payload into "#tag:content"
-        const iPound = std.mem.indexOf(u8, section, "#");
-        const iColon = std.mem.indexOf(u8, section, ":");
+        const iPound = std.mem.indexOf(u8, trimmed, "#");
+        const iColon = std.mem.indexOf(u8, trimmed, ":");
         if (iPound == null or iColon == null or iPound.? > iColon.?) {
+            log.err("Failed to parse tag:\n>>>>>\n{s}\n<<<<<", .{trimmed});
             return ParseError.InvalidTagSection;
         }
-        const tag = section[iPound.? + 1 .. iColon.?];
-        const data = section[iColon.? + 1 ..];
+        const tag = trimmed[iPound.? + 1 .. iColon.?];
+        const data = trimmed[iColon.? + 1 ..];
 
         // Parse tags
         if (std.mem.eql(u8, tag, "TITLE")) _ = try std.fmt.bufPrintZ(&simfile.title, "{s}", .{data});
@@ -60,6 +63,9 @@ pub fn parse(filename: []const u8, simfile: *Simfile) !*Simfile {
             }
         }
     }
+    
+    // Check defaults
+    if (chart.stops[0].type == .nil) chart.stops = chart.stops[0..0];
 
     if (!chartFound) return ParseError.PlayModeNotFound;
 
@@ -142,7 +148,7 @@ fn parseNotesTag(chart: *Simfile.Chart, data: []const u8) !bool {
 /// Parses all the measures in the #NOTES tag
 /// TODO: think about a return type that is consistent and makes sense
 fn parseNotesBody(chart: *Simfile.Chart, data: []const u8) void {
-    var notes = chart.notes;
+    const notes = chart.notes;
     const nCols: u4 = switch (chart.spdp) {
         .Sp => 4,
         .Dp => 8,
@@ -157,7 +163,9 @@ fn parseNotesBody(chart: *Simfile.Chart, data: []const u8) void {
     }
     log.debug("Parsed {d} notes\n", .{nNotes});
 
-    chart.notes = notes[0..nNotes]; // This sets actual len for chart.notes
+    const notesMerged = Simfile.Note.mergeSimultaneousNotes(notes[0..nNotes]);
+
+    chart.notes = notesMerged;
     chart.measures = nMeas + 1;
 }
 
@@ -182,9 +190,10 @@ fn parseMeasure(notes: []Simfile.Note, nCols: u4, nMeas: u8, data: []const u8) u
                 },
                 else => {
                     notes[nNotes] = Simfile.Note{
+                        .measure = nMeas,
                         .columns = Simfile.Note.getColumn(@truncate(col)),
                         .type = noteType,
-                        .numerator = denominator,
+                        .numerator = numerator,
                         .denominator = denominator,
                     };
                     nNotes += 1;

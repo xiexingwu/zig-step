@@ -46,6 +46,7 @@ pub const PlayMode = struct {
 
     autoplay: bool = true,
     assistClap: bool = true,
+    debug: bool = true,
 };
 
 const ARR_LNG = 0.15; // Side length of arrow, normalised by lane height

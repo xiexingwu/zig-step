@@ -1,11 +1,14 @@
 const Gimmick = @This();
 
+const std = @import("std");
+const inf = std.math.inf(f32);
+
 pub const GimmickType = enum(u2) { bpm, stop, nil };
 
 type: GimmickType = .nil,
-beat: f32 = 0,
-time: f32 = 0,
-value: f32 = 0, // Duration of stop or new bpm value
+beat: f32 = inf,
+time: f32 = inf,
+value: f32 = inf, // Duration of stop or new bpm value
 
 
 pub fn lessThan(_: @TypeOf(.{}), lhs: Gimmick, rhs: Gimmick) bool {
