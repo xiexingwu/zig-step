@@ -182,7 +182,7 @@ fn parseMeasure(notes: []Simfile.Note, nCols: u4, nMeas: u8, data: []const u8) u
 
         // Prepare to parse one line in the measure
         for (0..nCols) |col| {
-            const noteType: Simfile.Note.NoteType = @enumFromInt(line[col]);
+            const noteType: Simfile.Note.Value = @enumFromInt(line[col]);
             switch (noteType) {
                 .sentinel => {},
                 .mine, .fake, .roll => {
@@ -191,8 +191,8 @@ fn parseMeasure(notes: []Simfile.Note, nCols: u4, nMeas: u8, data: []const u8) u
                 else => {
                     notes[nNotes] = Simfile.Note{
                         .measure = nMeas,
-                        .columns = Simfile.Note.getColumn(@truncate(col)),
-                        .type = noteType,
+                        .columns = Simfile.Note.getColumnBits(@truncate(col)),
+                        .value = noteType,
                         .numerator = numerator,
                         .denominator = denominator,
                     };

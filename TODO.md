@@ -2,8 +2,8 @@
 - [ ] Song offset -> add to chart/note, since it's invisible to rl.getMusicTimePlayed
 - [ ] Audio/Visual offset -> add to chart/note, since it's invisible to rl.getMusicTimePlayed
 - [x] If BPM gimmick occurs between frames, correct beat in `updateBeat()`
-- [ ] Holds
-- [ ] Jumps
+- [ ] Holds (store start time in time2 field?)
+- [x] Jumps
 - [ ] Shocks
 - [ ] Auto-generate ghost steps for stops
   - Consider adding a ghost-step []Note and process it when a stop is encountered while timing notes

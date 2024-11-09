@@ -4,7 +4,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const parse = @import("./parse.zig");
 const time = @import("./time.zig");
-const play = @import("../play.zig");
+const play = @import("../play/Play.zig");
 const log = std.log;
 
 pub const Chart = @import("./Chart.zig");

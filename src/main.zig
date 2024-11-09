@@ -4,14 +4,15 @@ const log = std.log;
 const rl = @import("raylib");
 
 const Simfile = @import("./simfile/Simfile.zig");
-const play = @import("./play.zig");
+const Play = @import("./play/Play.zig");
 const screen = @import("./screen.zig");
+const sounds = @import("./play/Sounds.zig");
 
 const appState = struct {
     pub var showDebug = true;
     pub var masterVolume: f32 = 0.5;
 
-    pub var playMode = play.PlayMode{
+    pub var playMode = Play.PlayMode{
         .spdp = .Sp,
         .diff = .Hard,
         .mod = .mmod,
@@ -35,6 +36,8 @@ pub fn main() anyerror!void {
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
 
+    sounds.init();
+    defer sounds.deinit();
     //--------------------------------------------------------------------------------------
     // Load User/Play config
     //--------------------------------------------------------------------------------------
@@ -65,8 +68,8 @@ pub fn main() anyerror!void {
     //     Menu, Options, Browse, Play
     // };
     // var gameState: GameState = .Play;
-    try play.init(arenaAllocator, music, simfile, playMode);
-    defer play.deinit();
+    try Play.init(arenaAllocator, music, simfile, playMode);
+    defer Play.deinit();
 
     // Main game loop
     log.debug("-----STARTING GAME LOOP------", .{});
@@ -76,7 +79,7 @@ pub fn main() anyerror!void {
         //----------------------------------------------------------------------------------
         rl.updateMusicStream(music);
 
-        if (play.hasSongEnded()) {
+        if (Play.hasSongEnded()) {
             rl.stopMusicStream(music);
             rl.closeWindow();
         }
@@ -84,8 +87,8 @@ pub fn main() anyerror!void {
 
         updateAppState();
 
-        play.updateBeat();
-        play.judgeArrows();
+        Play.updateBeat();
+        Play.judgeArrows();
         //----------------------------------------------------------------------------------
         // Draw
         //----------------------------------------------------------------------------------
@@ -94,10 +97,9 @@ pub fn main() anyerror!void {
 
         rl.clearBackground(rl.Color.black);
 
-        play.drawArrows();
-        play.drawLane();
+        Play.Lane.draw(Play.state);
 
-        play.drawTimePlayedMsg();
+        Play.drawTimePlayedMsg();
         if (appState.showDebug) {
             screen.drawDebug(appState);
         }

@@ -1,6 +1,12 @@
 const std = @import("std");
 const rl = @import("raylib");
 
+pub const ARR_LNG = 0.15; // Side length of arrow, normalised by lane height
+
+pub fn getArrSzPx() i32 {
+    return toPx(ARR_LNG);
+}
+
 pub const Dims = struct {
     width: i32,
     height: i32,
@@ -96,7 +102,7 @@ pub fn drawDebug(appState: anytype) void {
     len += (std.fmt.bufPrintZ(
         buf[len..],
         "{s}: {d: >4.2}\n",
-        .{mod, modValue},
+        .{ mod, modValue },
     ) catch "   ").len;
 
     rl.drawText(buf[0..len :0], 10, 10, 14, rl.Color.green);

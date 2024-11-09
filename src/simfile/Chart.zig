@@ -4,7 +4,7 @@ const std = @import("std");
 const log = std.log;
 
 const Simfile = @import("./simfile.zig");
-const play = @import("../play.zig");
+const Play = @import("../play/Play.zig");
 const Note = Simfile.Note;
 const Gimmick = Simfile.Gimmick;
 
@@ -12,8 +12,8 @@ const MAX_NOTES = 1024; // MAX360 CSP is 1000
 const MAX_BPMS = 512; // DeltaMAX is 473
 const MAX_STOPS = 128; // Chaos TTM is 70(?)
 
-spdp: play.SpDp,
-diff: play.Diff,
+spdp: Play.PlayMode.SpDp,
+diff: Play.PlayMode.Diff,
 level: u8 = 0,
 
 bpms: []Gimmick,
@@ -25,7 +25,7 @@ measures: u8,
 
 notes: []Note,
 
-pub fn new(allocator: std.mem.Allocator, playMode: *play.PlayMode) !*Chart {
+pub fn new(allocator: std.mem.Allocator, playMode: *Play.PlayMode) !*Chart {
     var chart = try allocator.create(Chart);
     chart.bpms = try allocator.alloc(Gimmick, MAX_BPMS);
     chart.stops = try allocator.alloc(Gimmick, MAX_STOPS);

@@ -6,7 +6,7 @@ const rl = @import("raylib");
 const Simfile = @import("./Simfile.zig");
 const log = std.log;
 
-pub const NoteType = enum(u8) {
+pub const Value = enum(u8) {
     sentinel = '0',
     note,
     hold,
@@ -17,7 +17,14 @@ pub const NoteType = enum(u8) {
     pseudoHold = 'H', // Jump with at least one arrow as a hold/roll
 };
 
-type: NoteType = .sentinel,
+pub const Orientation = enum(u8) {
+    L = 'L',
+    R = 'R',
+    D = 'D',
+    U = 'U',
+};
+
+value: Value = .sentinel,
 
 // bit-wise indication of active columns
 // For SP: only the 4 LSBs are used, with MSB being left, LSB being right
@@ -28,27 +35,25 @@ denominator: u8 = 0, // # of lines measure is broken into: 4 = quarter notes, 8 
 numerator: u8 = 0, // line of appearance (0-indexed)
 measure: u8 = 0, // measure (0-indexed)
 time: f32 = 0, // arrival time (sec)
+time2: f32 = 0, // alternate time field, e.g. start of hold/roll
 
-pub fn lessThan(_: @TypeOf(.{}), lhs: Note, rhs: Note) bool {
-    // Sentinel should settle to the end
-    if (lhs.type == .sentinel) return false;
-    if (rhs.type == .sentinel) return true;
-    if (lhs.getSongBeat() < rhs.getSongBeat()) return true;
-    return false;
+//// Methods
+
+pub fn isJump(self: Note) bool {
+    return !std.math.isPowerOfTwo(self.columns);
 }
 
-pub fn getColumnChar(self: Note) u8 {
-    return switch (self.columns) {
-        1 << 7 => 'L',
-        1 << 6 => 'D',
-        1 << 5 => 'U',
-        1 << 4 => 'R',
-        1 << 3 => 'l',
-        1 << 2 => 'd',
-        1 << 1 => 'u',
-        1 << 0 => 'r',
-        else => unreachable,
-    };
+pub fn hasColumnNum(self: Note, colNum: u3) bool {
+    return self.columns & getColumnBits(colNum) > 0;
+}
+
+pub fn getColumnStr(self: Note) []u8 {
+    var buf: [8]u8 = undefined;
+    for (0..8) |i| {
+        const col: u3 = i;
+        buf[i] = if (self.hasColumnNum(col)) Note.getColumnChar(col) else '-';
+    }
+    return buf;
 }
 
 pub fn getMeasBeat(self: Note) f32 {
@@ -63,7 +68,7 @@ pub fn getSongBeat(self: Note) f32 {
 }
 
 pub fn getColor(self: Note) rl.Color {
-    switch (self.type) {
+    switch (self.value) {
         .tail, .roll, .mine, .fake => {
             return rl.Color.blank;
         },
@@ -105,21 +110,36 @@ pub fn getColor(self: Note) rl.Color {
     };
 }
 
-pub fn isJump(self: Note) bool {
-    return !std.math.isPowerOfTwo(self.columns);
+//// Type functions
+
+pub fn lessThan(_: @TypeOf(.{}), lhs: Note, rhs: Note) bool {
+    // Sentinel should settle to the end
+    if (lhs.value == .sentinel) return false;
+    if (rhs.value == .sentinel) return true;
+    if (lhs.getSongBeat() < rhs.getSongBeat()) return true;
+    return false;
 }
 
-pub fn hasColumn(self: Note, colNum: u3) bool {
-    return self.note & getColumn(colNum) > 0;
+pub fn getColumnNum(column: u8) u3 {
+    std.debug.assert(std.math.isPowerOfTwo(column));
+    return @intCast(std.math.log2_int(u8, column));
 }
 
-pub fn getColumnNum(col: u8) u3 {
-    std.debug.assert(std.math.isPowerOfTwo(col));
-    return std.math.log2_int(u3, col);
+pub fn getOrientation(colNum: u3) Orientation {
+    return switch (colNum) {
+        0, 4 => .R,
+        1, 5 => .U,
+        2, 6 => .D,
+        3, 7 => .L,
+    };
 }
 
-pub fn getColumn(colNum: u3) u8 {
+pub fn getColumnBits(colNum: u3) u8 {
     return @as(u8, 1) << colNum;
+}
+
+pub fn getColumnChar(colNum: u3) u8 {
+    return @tagName(getOrientation(colNum));
 }
 
 /// Jumps (two simulations notes) are considered one note.
@@ -136,17 +156,17 @@ pub fn mergeSimultaneousNotes(notes: []Simfile.Note) []Simfile.Note {
         var n1 = &notes[i];
         var n2 = &notes[i + 1];
         if (n1.getSongBeat() != n2.getSongBeat()) continue; // Not simultaneous
-        if (n1.type == .sentinel) unreachable; // Already processed
+        if (n1.value == .sentinel) unreachable; // Already processed
 
         // Check for psuedo hold
-        const canN1Pseudo = n1.type == .note or n1.type == .hold or n1.type == .roll;
-        const canN2Pseudo = n2.type == .note or n2.type == .hold or n2.type == .roll;
-        if (!(canN1Pseudo and canN2Pseudo) and n1.type != n2.type) continue; // Notes of differen type can't merge
+        const canN1Pseudo = n1.value == .note or n1.value == .hold or n1.value == .roll;
+        const canN2Pseudo = n2.value == .note or n2.value == .hold or n2.value == .roll;
+        if (!(canN1Pseudo and canN2Pseudo) and n1.value != n2.value) continue; // Notes of differen type can't merge
 
         const columns = n2.columns | n1.columns; // Merge columns
 
-        if (n1.type == n2.type) {
-            switch (n1.type) {
+        if (n1.value == n2.value) {
+            switch (n1.value) {
                 .note => {},
                 .hold, .roll => freezeCols = columns, // mark frozen columns
                 .tail => {
@@ -159,12 +179,12 @@ pub fn mergeSimultaneousNotes(notes: []Simfile.Note) []Simfile.Note {
                 else => continue,
             }
         } else {
-            n2.type = .pseudoHold;
+            n2.value = .pseudoHold;
         }
 
         log.debug(
             "Merging {}:{}, beat {d:.2}:{d:.2}, type {s}:{s}",
-            .{ i, i + 1, n1.getSongBeat(), n2.getSongBeat(), @tagName(n1.type), @tagName(n2.type) },
+            .{ i, i + 1, n1.getSongBeat(), n2.getSongBeat(), @tagName(n1.value), @tagName(n2.value) },
         );
         n1.* = Simfile.Note.Note0;
         n2.columns = columns;
@@ -181,7 +201,7 @@ pub fn summariseNotes(notes: []Note) void {
     var iJump: u16 = 0;
     var iOk: u16 = 0;
     for (notes, 0..) |note, i| {
-        switch (note.type) {
+        switch (note.value) {
             .note, .hold, .pseudoHold => {
                 iNote += 1;
                 iJump += if (note.isJump()) 1 else 0;
@@ -190,7 +210,7 @@ pub fn summariseNotes(notes: []Note) void {
                 iOk += 1;
             },
             else => {
-                log.err("Note {}: {s} @ meas {} {}/{}", .{ i, @tagName(note.type), note.measure, note.numerator, note.denominator });
+                log.err("Note {}: {s} @ meas {} {}/{}", .{ i, @tagName(note.value), note.measure, note.numerator, note.denominator });
                 unreachable;
             },
         }
