@@ -31,9 +31,9 @@ value: Value = .sentinel,
 // For DP: MSB is p1-left, LSB is p2-right
 columns: u8 = 0,
 
-denominator: u8 = 0, // # of lines measure is broken into: 4 = quarter notes, 8 = eighth notes etc.
-numerator: u8 = 0, // line of appearance (0-indexed)
-measure: u8 = 0, // measure (0-indexed)
+denominator: u16 = 0, // # of lines measure is broken into: 4 = quarter notes, 8 = eighth notes etc.
+numerator: u16 = 0, // line of appearance (0-indexed)
+measure: u16 = 0, // measure (0-indexed)
 time: f32 = 0, // arrival time (sec)
 time2: f32 = 0, // alternate time field, e.g. start of hold/roll
 
@@ -47,13 +47,27 @@ pub fn hasColumnNum(self: Note, colNum: u3) bool {
     return self.columns & getColumnBits(colNum) > 0;
 }
 
-pub fn getColumnStr(self: Note) []u8 {
+pub fn getColumnStr(self: Note) [8]u8 {
     var buf: [8]u8 = undefined;
     for (0..8) |i| {
-        const col: u3 = i;
-        buf[i] = if (self.hasColumnNum(col)) Note.getColumnChar(col) else '-';
+        const colNum: u3 = @intCast(7 - i);
+        buf[i] = if (self.hasColumnNum(colNum)) Note.getOrientationChar(colNum) else ' ';
     }
     return buf;
+}
+
+pub fn getValueStr(self: Note) [8]u8 {
+    var buf: [8]u8 = undefined;
+    for (0..8) |i| {
+        const colNum: u3 = @intCast(7 - i);
+        buf[i] = if (self.hasColumnNum(colNum)) Note.getValueChar(self.value) else ' ';
+    }
+    return buf;
+}
+
+pub fn getDebugStr(self: Note) [:0]u8 {
+    var buf: [18]u8 = undefined;
+    return std.fmt.bufPrintZ(&buf, "{s}\n{s}", .{ self.getColumnStr(), self.getValueStr() }) catch unreachable;
 }
 
 pub fn getMeasBeat(self: Note) f32 {
@@ -69,9 +83,9 @@ pub fn getSongBeat(self: Note) f32 {
 
 pub fn getColor(self: Note) rl.Color {
     switch (self.value) {
-        .tail, .roll, .mine, .fake => {
-            return rl.Color.blank;
-        },
+        .roll, .mine, .fake => return rl.Color.blank,
+        .tail => return rl.Color.gray,
+        .hold => return rl.Color.dark_green,
         .sentinel => unreachable,
         else => {},
     }
@@ -138,10 +152,14 @@ pub fn getColumnBits(colNum: u3) u8 {
     return @as(u8, 1) << colNum;
 }
 
-pub fn getColumnChar(colNum: u3) u8 {
-    return @tagName(getOrientation(colNum));
+pub fn getOrientationChar(colNum: u3) u8 {
+    const char = @tagName(getOrientation(colNum))[0];
+    return if (colNum >= 4) std.ascii.toLower(char) else char;
 }
 
+pub fn getValueChar(value: Note.Value) u8 {
+    return @tagName(value)[0];
+}
 /// Jumps (two simulations notes) are considered one note.
 /// Freeze tails are considered one note iff the corresponding holds started as one note.
 /// Jumps where only one foot is a freeze will become type=pseudo-hold so it can appear green
@@ -183,8 +201,8 @@ pub fn mergeSimultaneousNotes(notes: []Simfile.Note) []Simfile.Note {
         }
 
         log.debug(
-            "Merging {}:{}, beat {d:.2}:{d:.2}, type {s}:{s}",
-            .{ i, i + 1, n1.getSongBeat(), n2.getSongBeat(), @tagName(n1.value), @tagName(n2.value) },
+            "Merging {}:{}, meas {} {}/{}, beat {d:.2}:{d:.2}, type {s}:{s}",
+            .{ i, i + 1, n1.measure, n1.numerator, n1.denominator, n1.getSongBeat(), n2.getSongBeat(), @tagName(n1.value), @tagName(n2.value),  },
         );
         n1.* = Simfile.Note.Note0;
         n2.columns = columns;

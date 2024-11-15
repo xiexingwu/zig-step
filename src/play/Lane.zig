@@ -27,6 +27,8 @@ pub fn draw(state: Play) void {
     rl.drawTexture(laneTexture, pos.x, pos.y, rl.Color.white);
     // drawGuides(state); // missing implementation
     drawArrows(state);
+
+    drawStats(state);
 }
 
 fn loadReceptorTexture(spdp: Play.PlayMode.SpDp) rl.Texture {
@@ -77,33 +79,36 @@ fn loadReceptorDownImage() rl.Image {
     return rl.loadImage("./resources/down_receptor_dark_64.png");
 }
 
-fn drawArrow(arrow: Arrow, state: Play) void {
-    const time = rl.getMusicTimePlayed(state.music);
-
-    // Determine draw location
-    const distance = beatToDist(arrow.beat - state.beat, state.playMode.modValue);
-    if (TARGET_OFFSET_Y + distance > 1) return;
-
-    const yPos = screen.toPx(TARGET_OFFSET_Y + distance);
-
-    // Apply CONSTANT fade
-    const UNFADE_TIME = 0.2; // Time (s) to unfade the arrow
-    var tint = rl.Color.white;
-    if (state.playMode.constant) |constant| {
-        const timeUntil = arrow.time - time;
-        var constAlpha = (constant / 1000.0 - timeUntil) / UNFADE_TIME;
-        constAlpha = @max(0, @min(1, constAlpha));
-        tint = rl.fade(tint, constAlpha);
-    }
-
-    rl.drawTexture(arrow.texture, 0, yPos, tint);
-}
-
 fn drawArrows(state: Play) void {
     const arrows = state.arrows[state.i_nextArrow..];
     for (arrows) |arrow| {
         std.debug.assert(arrow.judgment == .nil);
-        drawArrow(arrow, state);
+        const time = rl.getMusicTimePlayed(state.music);
+
+        // Determine draw location
+        const distance = beatToDist(arrow.beat - state.beat, state.playMode.modValue);
+        if (TARGET_OFFSET_Y + distance > 1) return;
+
+        const yPos = screen.toPx(TARGET_OFFSET_Y + distance);
+
+        // Apply CONSTANT fade
+        const UNFADE_TIME = 0.2; // Time (s) to unfade the arrow
+        var tint = rl.Color.white;
+        if (state.playMode.constant) |constant| {
+            const timeUntil = arrow.time - time;
+            var constAlpha = (constant / 1000.0 - timeUntil) / UNFADE_TIME;
+            constAlpha = @max(0, @min(1, constAlpha));
+            tint = rl.fade(tint, constAlpha);
+        }
+
+        rl.drawTexture(arrow.texture, 0, yPos, tint);
+
+        const showDebug = @import("../main.zig").appState.showDebug;
+        if (showDebug) {
+            const font = if (rl.isFontReady(screen.debugFont)) screen.debugFont else rl.getFontDefault();
+            const debugStr = arrow.note.getDebugStr()[0..17 :0];
+            rl.drawTextEx(font, debugStr, .{ .x = 0, .y = @floatFromInt(yPos) }, 24.0, 4, rl.Color.white);
+        }
     }
 }
 
@@ -122,4 +127,16 @@ pub fn getArrXPx(spdp: Play.PlayMode.SpDp, col: u3) i32 {
         .Dp => 8,
     };
     return (nCols - 1 - col) * screen.getArrSzPx();
+}
+
+fn drawStats(state: Play) void {
+    var buf: [64]u8 = undefined;
+    const stats = std.fmt.bufPrintZ(
+        &buf,
+        "Hit :{d: >3}\nMiss:{d: >3}\nOK  :{d: >3}",
+        .{ state.notesTap, state.notesMiss, state.notesOk },
+    ) catch "";
+    const pos = screen.Px.fromPt(.{ .x = 0.7, .y = 0.8 });
+    const font = if (rl.isFontReady(screen.debugFont)) screen.debugFont else rl.getFontDefault();
+    rl.drawTextEx(font, stats, .{ .x = @floatFromInt(pos.x), .y = @floatFromInt(pos.y) }, 24.0, 4, rl.Color.white);
 }

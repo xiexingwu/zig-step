@@ -13,15 +13,21 @@ const log = std.log;
 note: Simfile.Note,
 beat: f32, // for MMOD
 time: f32, // for CMOD and judgment
+time2: f32 = -1, // start of hold/roll
 texture: rl.Texture,
 judgment: Judgment.Kind = .nil,
+judgmentOk: ?bool = null,
+
+timeTapped: f32 = -1, // To track hold/roll progress
 
 /// Given the notes of a simfile chart, this initialises an array of arrows
 /// that can be rendered/judged during play.
 pub fn init(allocator: std.mem.Allocator, spdp: PlayMode.SpDp, notes: []Simfile.Note) ![]Arrow {
+    initBaseArrowImgs();
+
     var arrows = try allocator.alloc(Arrow, notes.len);
     for (notes, 0..) |note, i| {
-        const img = genImageArrow(spdp, note);
+        const img = genImageArrow(spdp, note, i);
         defer rl.unloadImage(img);
         const texture = rl.loadTextureFromImage(img);
         arrows[i] = .{
@@ -101,9 +107,9 @@ pub fn judge(self: Arrow, state: Play) ?Judgment.Kind {
         if (state.playMode.assistClap and (self.note.value == .note or self.note.value == .hold)) {
             rl.playSound(Sounds.clap);
         }
-        return .marvelous;
+        return if (self.note.value == .tail) .ok else .marvelous;
     }
-    if (correct and @abs(timing) <= 0.0167) return .marvelous;
+    if (correct and @abs(timing) <= 0.0167) return if (self.note.value == .tail) .ok else .marvelous;
     if (correct and @abs(timing) <= 0.033) return .perfect;
     if (correct and @abs(timing) <= 0.092) return .great;
     if (correct and @abs(timing) <= 0.142) return .good;
@@ -134,22 +140,20 @@ fn genImageCircleArrow() rl.Image {
 }
 
 /// Loads a down arrow
-fn genImageArrow(spdp: PlayMode.SpDp, note: Simfile.Note) rl.Image {
+fn genImageArrow(spdp: PlayMode.SpDp, note: Simfile.Note, arrIndex: usize) rl.Image {
     var canvas = rl.genImageColor(screen.dims.width, screen.getArrSzPx(), rl.Color.blank);
-
-    log.err("This section breaks now that note.columns can have multiple active bits.", .{});
-    std.debug.assert(false);
 
     const nCols: u4 = switch (spdp) {
         .Sp => 4,
         .Dp => 8,
     };
+
     for (0..nCols) |i| {
         const colNum: u3 = @intCast(i);
         if (!note.hasColumnNum(colNum)) continue;
 
         const arrow = baseArrowImgs.get(Simfile.Note.getOrientation(colNum));
-        const xPos: f32 = @floatFromInt(Play.Lane.getArrXPx(spdp, Simfile.Note.getColumnNum(colNum)));
+        const xPos: f32 = @floatFromInt(Play.Lane.getArrXPx(spdp, colNum));
         const arrSz: f32 = @floatFromInt(screen.getArrSzPx());
         rl.imageDraw(
             &canvas,
@@ -158,8 +162,17 @@ fn genImageArrow(spdp: PlayMode.SpDp, note: Simfile.Note) rl.Image {
             .{ .x = xPos, .y = 0, .width = arrSz, .height = arrSz },
             rl.Color.white,
         );
+
+        const showDebug = @import("../main.zig").appState.showDebug;
+        if (showDebug) {
+            var buf: [8]u8 = undefined;
+            const indexStr = std.fmt.bufPrintZ(&buf, "{d:.0}", .{arrIndex}) catch unreachable;
+            const font = if (rl.isFontReady(screen.debugFont)) screen.debugFont else rl.getFontDefault();
+            rl.imageDrawTextEx(&canvas, font, indexStr, .{ .x = xPos + arrSz / 2, .y = arrSz / 2 }, 24.0, 4, rl.Color.white);
+        }
     }
 
     rl.imageColorTint(&canvas, note.getColor());
+
     return canvas;
 }

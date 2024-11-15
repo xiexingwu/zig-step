@@ -1,7 +1,25 @@
+const screen = @This();
+
 const std = @import("std");
 const rl = @import("raylib");
+const log = std.log;
 
 pub const ARR_LNG = 0.15; // Side length of arrow, normalised by lane height
+const LANE_AR: f32 = 2.0 / 3.0;
+
+pub var debugFont: rl.Font = undefined;
+pub var dims: Dims = .{ .width = 600*LANE_AR, .height = 600 };
+
+pub fn init() void {
+    // debugFont = rl.loadFont("./resources/MesloLGMNerdFontMono-Regular.ttf");
+    debugFont = rl.loadFont("./resources/MesloLGSDZNerdFontMono-Regular.ttf");
+    // debugFont = rl.loadFont("./resources/SF-Pro.ttf");
+}
+
+pub fn deinit() void {
+    rl.unloadFont(debugFont);
+}
+
 
 pub fn getArrSzPx() i32 {
     return toPx(ARR_LNG);
@@ -11,8 +29,6 @@ pub const Dims = struct {
     width: i32,
     height: i32,
 };
-
-pub var dims: Dims = .{ .width = 0, .height = 0 };
 
 /// Screen pixel coordinate
 pub const Px = struct {
@@ -55,17 +71,6 @@ pub const Pt = struct {
         };
     }
 };
-
-const LANE_AR: f32 = 2.0 / 3.0;
-
-pub fn init() void {
-    const heightDefault = 600;
-    const widthDefault = LANE_AR * heightDefault;
-    dims.width = widthDefault;
-    dims.height = heightDefault;
-}
-
-pub fn deinit() void {}
 
 pub fn drawDebug(appState: anytype) void {
     var buf: [128]u8 = undefined;

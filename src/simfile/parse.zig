@@ -63,7 +63,7 @@ pub fn parse(filename: []const u8, simfile: *Simfile) !*Simfile {
             }
         }
     }
-    
+
     // Check defaults
     if (chart.stops[0].type == .nil) chart.stops = chart.stops[0..0];
 
@@ -181,22 +181,27 @@ fn parseMeasure(notes: []Simfile.Note, nCols: u4, nMeas: u8, data: []const u8) u
     while (lineIt.next()) |line| : (numerator += 1) {
 
         // Prepare to parse one line in the measure
-        for (0..nCols) |col| {
-            const noteType: Simfile.Note.Value = @enumFromInt(line[col]);
-            switch (noteType) {
+        for (0..nCols) |i| {
+            const value: Simfile.Note.Value = @enumFromInt(line[i]); // i is from left->right
+            const colNum: u3 = @intCast(nCols - 1 - i); // colNum is right->left
+            switch (value) {
                 .sentinel => {},
                 .mine, .fake, .roll => {
-                    log.debug("Unparsed noted {s}: measure {} col {}", .{ @tagName(noteType), nMeas, col });
+                    log.debug("Unparsed noted {s}: measure {} col {}", .{ @tagName(value), nMeas, colNum });
                 },
                 else => {
                     notes[nNotes] = Simfile.Note{
                         .measure = nMeas,
-                        .columns = Simfile.Note.getColumnBits(@truncate(col)),
-                        .value = noteType,
+                        .columns = Simfile.Note.getColumnBits(@truncate(colNum)),
+                        .value = value,
                         .numerator = numerator,
                         .denominator = denominator,
                     };
                     nNotes += 1;
+                    log.debug(
+                        "Meas {} {}/{}Note {}: {c}{} {s}",
+                        .{ nMeas, numerator, denominator, nNotes, Simfile.Note.getOrientationChar(colNum), colNum, @tagName(value) },
+                    );
                 },
             }
         }

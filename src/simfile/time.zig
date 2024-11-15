@@ -6,7 +6,7 @@ const utils = @import("../utils/utils.zig");
 const Gimmick = Simfile.Gimmick;
 const beatToTime = utils.beatToTime;
 
-pub fn timeAlloc(allocator: std.mem.Allocator, chart: *Simfile.Chart) !*Simfile.Chart{
+pub fn timeAlloc(allocator: std.mem.Allocator, chart: *Simfile.Chart) !*Simfile.Chart {
 
     // Sort gimmicks and compute timings
     const gimmsConcat = [_][]Simfile.Gimmick{ chart.stops, chart.bpms };
@@ -21,10 +21,9 @@ pub fn timeAlloc(allocator: std.mem.Allocator, chart: *Simfile.Chart) !*Simfile.
     return chart;
 }
 
-
 /// Determine the time each gimmick starts
 fn timeGimmicks(gimms: []Gimmick) []Gimmick {
-    std.debug.assert(gimms[0].type == .bpm and gimms[0].value != 0);
+    std.debug.assert(gimms[0].type == .bpm and gimms[0].beat == 0 and gimms[0].value != 0);
     var bpmPrev = gimms[0].value;
     var beatPrev = 0 * gimms[0].beat;
     var time = 0 * gimms[0].time; // TODO: offset
@@ -54,63 +53,45 @@ fn timeGimmicks(gimms: []Gimmick) []Gimmick {
 /// Determine the arrival time for all notes.
 /// TODO think of return value
 fn timeNotes(chart: *Simfile.Chart) void {
+    log.err("something wrong with timing.", .{});
+    std.debug.assert(false);
+
     const notes = chart.notes;
     const gimms = chart.gimms;
 
     var i_gimm: u16 = 1; // Skip first value (sets song bpm and is not an actual gimmick)
     var i_note: u16 = 0;
     var time: f32 = 0.0;
-    var bpm = chart.bpms[0].value;
+    var bpmPrev = chart.bpms[0].value;
     for (0..chart.measures) |meas| {
         var beatPrev: f32 = 0;
         for (0..4) |beatMeasInt| {
             const beatMeas: f32 = @floatFromInt(beatMeasInt + 1);
-            defer {
-                time += beatToTime(beatMeas - beatPrev, bpm);
-                beatPrev = beatMeas;
-            }
 
             // Loop over remaining notes and check if this beat in the measure
             // needs to be further split by the notes.
             while (i_note < notes.len) : (i_note += 1) {
-                var note = &notes[i_note]; // Use ptr since we need to modify timing
-                // Check next note is for this measure
+                var note = &notes[i_note];
+                // Check note is for this measure
                 if (note.measure > meas) break;
-                // Check next note is for this beat in the measure
+                // Check note is for this beat in the measure
                 const beatNote = note.getMeasBeat();
                 if (beatNote > beatMeas) break;
 
-                // We now know beatMeas will be split by the note.
-                defer {
-                    time += beatToTime(beatNote - beatPrev, bpm);
-                    note.time = time;
-                    beatPrev = beatNote;
-                    // print("m{d: >2} b{d: >3}/{d: <3} = {d: >5.2}: n{} @ {c} {s} @ {d:.2}s\n", .{
-                    //     meas,
-                    //     note.numerator,
-                    //     note.denominator,
-                    //     beatNote,
-                    //     i_note,
-                    //     note.getColumnChar(),
-                    //     @tagName(note.type),
-                    //     note.time,
-                    // });
-                }
-
-                // Check for gimmicks
+                // Check for gimmicks to further split
                 while (i_gimm < gimms.len) : (i_gimm += 1) {
                     const gimm = gimms[i_gimm];
                     // Gimmick beat is relative to song start. Convert to measure start
                     const beatGimm = gimm.beat - 4.0 * @as(f32, @floatFromInt(meas));
-                    // Check next gimmick occurs before this note
+                    // Check gimmick occurs before this note
                     if (beatGimm >= beatNote) break;
                     log.debug("{d:.2}s found {s}: b{d:.2} with value {d:.2} @ {d:.2}s", .{ time, @tagName(gimm.type), gimm.beat, gimm.value, gimm.time });
 
                     switch (gimm.type) {
                         .bpm => {
                             // Bpm change should split the beat
-                            time += beatToTime(beatGimm - beatPrev, bpm);
-                            bpm = gimm.value;
+                            time += beatToTime(beatGimm - beatPrev, bpmPrev);
+                            bpmPrev = gimm.value;
                             beatPrev = beatGimm;
                             // The time should now sync with when the bpm change happens
                             std.debug.assert(@abs(gimm.time - time) < 0.01);
@@ -125,8 +106,15 @@ fn timeNotes(chart: *Simfile.Chart) void {
                         },
                     }
                 }
+
+                // Prep next note
+                time += beatToTime(beatNote - beatPrev, bpmPrev);
+                note.time = time;
+                beatPrev = beatNote;
             }
+            // Prep next beat
+            time += beatToTime(beatMeas - beatPrev, bpmPrev);
+            beatPrev = beatMeas;
         }
     }
-
 }

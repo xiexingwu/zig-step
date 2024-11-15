@@ -4,7 +4,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const parse = @import("./parse.zig");
 const time = @import("./time.zig");
-const play = @import("../play/Play.zig");
+const Play = @import("../play/Play.zig");
 const log = std.log;
 
 pub const Chart = @import("./Chart.zig");
@@ -16,7 +16,7 @@ artist: [128]u8,
 chart: *Chart,
 
 
-pub fn fromFile(allocator: std.mem.Allocator, filename: []const u8, playMode: *play.PlayMode) !*Simfile {
+pub fn fromFile(allocator: std.mem.Allocator, filename: []const u8, playMode: *Play.PlayMode) !*Simfile {
     var simfile = try allocator.create(Simfile);
     simfile.chart = try Chart.new(allocator, playMode);
 

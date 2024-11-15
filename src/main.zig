@@ -8,7 +8,7 @@ const Play = @import("./play/Play.zig");
 const screen = @import("./screen.zig");
 const sounds = @import("./play/Sounds.zig");
 
-const appState = struct {
+pub const appState = struct {
     pub var showDebug = true;
     pub var masterVolume: f32 = 0.5;
 
@@ -22,12 +22,10 @@ const appState = struct {
 };
 
 pub fn main() anyerror!void {
+    rl.setTraceLogLevel(.log_none);
     //--------------------------------------------------------------------------------------
     // Initialization
     //--------------------------------------------------------------------------------------
-    screen.init();
-    defer screen.deinit();
-
     rl.initWindow(screen.dims.width, screen.dims.height, "zig-step");
     defer rl.closeWindow();
 
@@ -38,6 +36,9 @@ pub fn main() anyerror!void {
 
     sounds.init();
     defer sounds.deinit();
+
+    screen.init();
+    defer screen.deinit();
     //--------------------------------------------------------------------------------------
     // Load User/Play config
     //--------------------------------------------------------------------------------------
@@ -45,7 +46,8 @@ pub fn main() anyerror!void {
 
     // const title = "Electronics Sports Complex";
     // const title = "Gravity Collapse";
-    const title = "mathematical good-bye";
+    // const title = "mathematical good-bye";
+    const title = "ANTI ANTHEM";
     //--------------------------------------------------------------------------------------
     // Load Music
     //--------------------------------------------------------------------------------------
