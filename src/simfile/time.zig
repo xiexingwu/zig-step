@@ -53,68 +53,49 @@ fn timeGimmicks(gimms: []Gimmick) []Gimmick {
 /// Determine the arrival time for all notes.
 /// TODO think of return value
 fn timeNotes(chart: *Simfile.Chart) void {
-    log.err("something wrong with timing.", .{});
-    std.debug.assert(false);
-
     const notes = chart.notes;
     const gimms = chart.gimms;
 
     var i_gimm: u16 = 1; // Skip first value (sets song bpm and is not an actual gimmick)
     var i_note: u16 = 0;
     var time: f32 = 0.0;
-    var bpmPrev = chart.bpms[0].value;
-    for (0..chart.measures) |meas| {
-        var beatPrev: f32 = 0;
-        for (0..4) |beatMeasInt| {
-            const beatMeas: f32 = @floatFromInt(beatMeasInt + 1);
+    var bpm = chart.bpms[0].value;
+    var beat: f32 = 0;
+    while (i_note < notes.len) : (i_note += 1) {
+        var note = &notes[i_note];
+        const beatNote = note.getSongBeat();
 
-            // Loop over remaining notes and check if this beat in the measure
-            // needs to be further split by the notes.
-            while (i_note < notes.len) : (i_note += 1) {
-                var note = &notes[i_note];
-                // Check note is for this measure
-                if (note.measure > meas) break;
-                // Check note is for this beat in the measure
-                const beatNote = note.getMeasBeat();
-                if (beatNote > beatMeas) break;
+        // Check for gimmicks that occur before the next note
+        while (i_gimm < gimms.len) : (i_gimm += 1) {
+            const gimm = gimms[i_gimm];
+            const beatGimm = gimm.beat;
+            // Check gimmick occurs before this note
+            if (beatGimm >= beatNote) break;
+            log.debug("{d:.2}s found {s}: b{d:.2} with value {d:.2} @ {d:.2}s", .{ time, @tagName(gimm.type), gimm.beat, gimm.value, gimm.time });
 
-                // Check for gimmicks to further split
-                while (i_gimm < gimms.len) : (i_gimm += 1) {
-                    const gimm = gimms[i_gimm];
-                    // Gimmick beat is relative to song start. Convert to measure start
-                    const beatGimm = gimm.beat - 4.0 * @as(f32, @floatFromInt(meas));
-                    // Check gimmick occurs before this note
-                    if (beatGimm >= beatNote) break;
-                    log.debug("{d:.2}s found {s}: b{d:.2} with value {d:.2} @ {d:.2}s", .{ time, @tagName(gimm.type), gimm.beat, gimm.value, gimm.time });
-
-                    switch (gimm.type) {
-                        .bpm => {
-                            // Bpm change should split the beat
-                            time += beatToTime(beatGimm - beatPrev, bpmPrev);
-                            bpmPrev = gimm.value;
-                            beatPrev = beatGimm;
-                            // The time should now sync with when the bpm change happens
-                            std.debug.assert(@abs(gimm.time - time) < 0.01);
-                        },
-                        .stop => {
-                            // Stops should just accumulate the time
-                            time += gimm.value;
-                        },
-                        .nil => {
-                            log.err("Found unintialised gimmick when timing notes", .{});
-                            unreachable;
-                        },
-                    }
-                }
-
-                // Prep next note
-                time += beatToTime(beatNote - beatPrev, bpmPrev);
-                note.time = time;
-                beatPrev = beatNote;
+            switch (gimm.type) {
+                .bpm => {
+                    // Bpm change should split the beat
+                    time += beatToTime(beatGimm - beat, bpm);
+                    bpm = gimm.value;
+                    beat = beatGimm;
+                    // The time should now sync with when the bpm change happens
+                    std.debug.assert(@abs(gimm.time - time) < 0.01);
+                },
+                .stop => {
+                    // Stops should just accumulate the time
+                    time += gimm.value;
+                },
+                .nil => {
+                    log.err("Found unintialised gimmick when timing notes", .{});
+                    unreachable;
+                },
             }
-            // Prep next beat
-            time += beatToTime(beatMeas - beatPrev, bpmPrev);
-            beatPrev = beatMeas;
         }
+
+        // Prep next note
+        time += beatToTime(beatNote - beat, bpm);
+        note.time = time;
+        beat = beatNote;
     }
 }

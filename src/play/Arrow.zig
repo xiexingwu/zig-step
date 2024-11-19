@@ -84,7 +84,7 @@ fn initBaseArrowImgs() void {
 }
 
 pub fn judge(self: Arrow, state: Play) ?Judgment.Kind {
-    const time = rl.getMusicTimePlayed(state.music);
+    const time = state.time;
     var keys: u8 = 0;
     // Check P1 & P2 notes
     if (rl.isKeyPressed(.key_left)) keys |= 1;
@@ -103,7 +103,8 @@ pub fn judge(self: Arrow, state: Play) ?Judgment.Kind {
     const correct = keys == self.note.columns;
 
     // TODO: Make this programmatic via JudgmentTypes
-    if (state.playMode.autoplay and @abs(timing) <= 0.0167) {
+    // TODO: Currently hits the frame after the note appears. Is there a better implementation?
+    if (state.playMode.autoplay and timing >= 0) {
         if (state.playMode.assistClap and (self.note.value == .note or self.note.value == .hold)) {
             rl.playSound(Sounds.clap);
         }

@@ -103,12 +103,12 @@ fn drawArrows(state: Play) void {
 
         rl.drawTexture(arrow.texture, 0, yPos, tint);
 
-        const showDebug = @import("../main.zig").appState.showDebug;
-        if (showDebug) {
-            const font = if (rl.isFontReady(screen.debugFont)) screen.debugFont else rl.getFontDefault();
-            const debugStr = arrow.note.getDebugStr()[0..17 :0];
-            rl.drawTextEx(font, debugStr, .{ .x = 0, .y = @floatFromInt(yPos) }, 24.0, 4, rl.Color.white);
-        }
+        // const showDebug = @import("../main.zig").appState.showDebug;
+        // if (showDebug) {
+        //     const font = if (rl.isFontReady(screen.debugFont)) screen.debugFont else rl.getFontDefault();
+        //     const debugStr = arrow.note.getDebugStr()[0..17 :0];
+        //     rl.drawTextEx(font, debugStr, .{ .x = 0, .y = @floatFromInt(yPos) }, 24.0, 4, rl.Color.white);
+        // }
     }
 }
 

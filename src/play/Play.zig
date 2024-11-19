@@ -80,6 +80,7 @@ pub fn hasSongEnded() bool {
 
 /// Determines the current beat # of the song
 pub fn updateBeat() void {
+    // Check if song should pause/resume
     if (rl.isKeyPressed(.key_space)) {
         state.musicPaused = !state.musicPaused;
         switch (state.musicPaused) {
@@ -89,8 +90,8 @@ pub fn updateBeat() void {
     }
     if (state.musicPaused) return;
 
+    // Get beat advanacement assuming frame is not interrupted by gimmick
     const time = rl.getMusicTimePlayed(state.music);
-
     const dt = time - state.time;
     var db = utils.timeToBeat(dt, state.bpm);
 
@@ -100,7 +101,7 @@ pub fn updateBeat() void {
     const i = &state.i_nextGimm;
     while (i.* < gimms.len) : (i.* += 1) {
         const gimm = gimms[i.*];
-        if (gimm.time > time) break; // don't need to deal with this gimmick yet
+        if (time < gimm.time) break; // don't need to deal with this gimmick yet
 
         // Initialise song bpm
         if (i.* == 0) {
@@ -110,24 +111,51 @@ pub fn updateBeat() void {
             continue;
         }
 
-        // print("time {d:.3}->{d:.3}s beat: {d:.2}\n", .{ state.time, time, state.beat });
         switch (gimm.type) {
-            // Pause beating until song catches up to end of stop
+            .bpm => {
+                // Split beat
+                const dtPartial = time - gimm.time; // second half of split beat
+                db -= utils.timeToBeat(dtPartial, state.bpm);
+                db += utils.timeToBeat(dtPartial, gimm.value);
+
+                // log.debug(
+                //     "bpm finished: {d:.3} -> {d:.3} -> {d:3}: bpm {d:.0} {d:.0}: db second half {d:.2}->{d:.2}",
+                //     .{ state.time, gimm.time, time, state.bpm, gimm.value, utils.timeToBeat(dtPartial, state.bpm), utils.timeToBeat(dtPartial, gimm.value) },
+                // );
+                // Update bpm
+                state.bpm = gimm.value;
+                continue;
+            },
             .stop => {
-                if (time < gimm.time + gimm.value) {
+                const timeEnd = gimm.time + gimm.value;
+                // First encounter of stop, zero-out second half of beat
+                if (state.time < gimm.time) {
+                    const dtPartial = time - gimm.time;
+                    // log.debug(
+                    //     "stop started: {d:.3}->{d:.3}->{d:.3}s: beat {d:.2}-{d:.2}: {d:.2}",
+                    //     .{ state.time, gimm.time, time, db, utils.timeToBeat(dtPartial, state.bpm), state.beat },
+                    // );
+                    db -= utils.timeToBeat(dtPartial, state.bpm);
+                    if (timeEnd < time) {
+                        log.err("A stop started/ended in same frame. Unhandled case.", .{});
+                        unreachable;
+                    }
+                    break;
+                }
+
+                // Subsequent encounters of stop. Wait for song to catch up to end of stop
+                if (time <= timeEnd) {
                     db = 0;
                     break;
                 }
-            },
 
-            // Update bpm (split beat if necessary)
-            .bpm => {
-                // const dt1 = gimm.time - state.time;
-                const dt2 = time - gimm.time;
-                db -= utils.timeToBeat(dt2, state.bpm);
-                db += utils.timeToBeat(dt2, gimm.value);
-
-                state.bpm = gimm.value;
+                // Stop ended, zero out first half of beat
+                const dtPartial = timeEnd - state.time;
+                // log.debug(
+                //     "stop finished: {d:.3}->{d:.3}->{d:.3}s: beat {d:.2}-{d:.2}: {d:.2}",
+                //     .{ state.time, timeEnd, time, db, utils.timeToBeat(dtPartial, state.bpm), state.beat },
+                // );
+                db -= utils.timeToBeat(dtPartial, state.bpm);
                 continue;
             },
             .nil => {
@@ -144,7 +172,6 @@ pub fn updateBeat() void {
 pub fn judgeArrows() void {
     const i = &state.i_nextArrow;
     const arrows = state.arrows;
-    const time = rl.getMusicTimePlayed(state.music);
     while (i.* < arrows.len) {
         var arrow = &arrows[i.*];
         if (arrow.judge(state)) |judgment| {
@@ -154,10 +181,10 @@ pub fn judgeArrows() void {
                 else => state.notesTap += 1,
             }
             arrow.judgment = judgment;
-            log.debug(
-                "arrow {d} @ b{d: >6.2}, {d: >6.2}s @ {d: >6.2}s judged {s}",
-                .{ i.*, arrow.beat, arrow.time, time, @tagName(judgment) },
-            );
+            // log.debug(
+            //     "arrow {d} @ b{d: >6.2}, {d: >6.2}s. state b{d: >6.2} {d: >6.2}s judged {s}",
+            //     .{ i.*, arrow.beat, arrow.time, state.beat, state.time, @tagName(judgment) },
+            // );
             rl.unloadTexture(arrow.texture);
             i.* += 1;
         } else {
